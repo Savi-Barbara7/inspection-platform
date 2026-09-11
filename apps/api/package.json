@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "deploy:staging": "wrangler deploy --env staging",
+    "deploy": "wrangler deploy",
     "deploy:production": "wrangler deploy --env production"
   },
   "dependencies": {
