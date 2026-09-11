@@ -1,0 +1,2 @@
+# Somente nomes/valores fictícios. Nunca colocar secrets reais neste arquivo.
+APP_ENV=local

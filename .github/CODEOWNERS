@@ -1,0 +1,5 @@
+# Ajustar handles quando a GitHub Organization estiver criada.
+* @OWNER_PLACEHOLDER
+/docs/security/ @OWNER_PLACEHOLDER
+/docs/privacy/ @OWNER_PLACEHOLDER
+/supabase/ @OWNER_PLACEHOLDER

@@ -1,0 +1,70 @@
+# File Index
+
+- `.env.example`
+- `.github/CODEOWNERS`
+- `.github/pull_request_template.md`
+- `.gitignore`
+- `AGENTS.md`
+- `CHANGELOG.md`
+- `CONTRIBUTING.md`
+- `LICENSES.md`
+- `PROMPT_MESTRE_IA.md`
+- `README.md`
+- `SECURITY.md`
+- `START_HERE.md`
+- `TASK_TEMPLATE.md`
+- `docs/DECISIONS_AT_A_GLANCE.md`
+- `docs/FOUNDATION_CHECKLIST.md`
+- `docs/SETUP_BEFORE_CODING.md`
+- `docs/TECHNICAL_SPEC_V1.md`
+- `docs/adr/ADR-0001-multi-tenancy.md`
+- `docs/adr/ADR-0002-postgres-supabase.md`
+- `docs/adr/ADR-0003-authentication.md`
+- `docs/adr/ADR-0004-authorization-rls.md`
+- `docs/adr/ADR-0005-monorepo.md`
+- `docs/adr/ADR-0006-template-architecture.md`
+- `docs/adr/ADR-0007-report-architecture.md`
+- `docs/adr/ADR-0008-storage.md`
+- `docs/adr/ADR-0009-evidence-immutability.md`
+- `docs/adr/ADR-0010-pdf-rendering.md`
+- `docs/adr/ADR-0011-offline.md`
+- `docs/adr/ADR-0012-audit.md`
+- `docs/adr/ADR-0013-billing.md`
+- `docs/adr/ADR-0014-api.md`
+- `docs/adr/ADR-0015-infrastructure-regions.md`
+- `docs/api/API_GUIDE.md`
+- `docs/architecture/CONTEXT.md`
+- `docs/architecture/DATA_FLOW.md`
+- `docs/architecture/MODULES.md`
+- `docs/architecture/OVERVIEW.md`
+- `docs/database/MIGRATIONS.md`
+- `docs/database/RLS.md`
+- `docs/database/SCHEMA.md`
+- `docs/domain/EVIDENCE.md`
+- `docs/domain/INSPECTIONS.md`
+- `docs/domain/ORGANIZATIONS.md`
+- `docs/domain/REPORTS.md`
+- `docs/domain/TEMPLATES.md`
+- `docs/privacy/DATA_MAP.md`
+- `docs/privacy/LGPD.md`
+- `docs/privacy/RETENTION.md`
+- `docs/privacy/SUBPROCESSORS.md`
+- `docs/product/FIRST_12_TASKS.md`
+- `docs/product/GLOSSARY.md`
+- `docs/product/ROADMAP.md`
+- `docs/runbooks/BACKUP_RESTORE.md`
+- `docs/runbooks/DEPLOYMENT.md`
+- `docs/runbooks/INCIDENT_RESPONSE.md`
+- `docs/runbooks/PDF_FAILURE.md`
+- `docs/runbooks/SYNC_FAILURE.md`
+- `docs/security/ASVS_MATRIX.md`
+- `docs/security/AUTHORIZATION.md`
+- `docs/security/FILE_SECURITY.md`
+- `docs/security/THREAT_MODEL.md`
+
+## Autonomous provisioning additions (v1.1)
+
+- `docs/infra/AUTONOMOUS_BOOTSTRAP.md` — Task 00 provisioning contract
+- `docs/infra/PROVISIONING_STATE.md` — non-secret inventory maintained by the agent
+- `docs/infra/RESOURCE_NAMING.md` — temporary resource names
+- `docs/adr/ADR-0016-autonomous-provisioning.md` — autonomy decision
