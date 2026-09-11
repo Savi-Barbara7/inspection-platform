@@ -1,11 +1,14 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "inspection-admin-staging",
+  "name": "inspection-admin",
   "compatibility_date": "2024-12-05",
   "assets": {
     "directory": "dist"
   },
   "env": {
+    "staging": {
+      "name": "inspection-admin-staging"
+    },
     "production": {
       "name": "inspection-admin-production"
     }

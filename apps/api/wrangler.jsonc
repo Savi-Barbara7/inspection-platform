@@ -1,12 +1,15 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "inspection-api-staging",
+  "name": "inspection-api",
   "main": "src/index.ts",
   "compatibility_date": "2024-12-05",
   "observability": {
     "enabled": true
   },
   "env": {
+    "staging": {
+      "name": "inspection-api-staging"
+    },
     "production": {
       "name": "inspection-api-production"
     }

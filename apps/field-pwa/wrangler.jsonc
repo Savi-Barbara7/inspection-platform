@@ -1,11 +1,14 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "inspection-field-staging",
+  "name": "inspection-field",
   "compatibility_date": "2024-12-05",
   "assets": {
     "directory": "dist"
   },
   "env": {
+    "staging": {
+      "name": "inspection-field-staging"
+    },
     "production": {
       "name": "inspection-field-production"
     }
