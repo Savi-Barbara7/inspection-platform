@@ -44,11 +44,16 @@
 
 ## Cloudflare
 
-- Git integration: `PENDING`
-- Admin Worker: `PENDING`
-- Field Worker: `PENDING`
-- API Worker: `PENDING`
-- Preview builds: `PENDING`
+- Account: `Savi.barbaral@gmail.com's Account` (`4c6bdd827fc264e595d9d533919860f8`)
+- Workers subdomain: `savi-barbaral.workers.dev`
+- Git integration: connected via Cloudflare's native "Connect GitHub" flow (Workers Builds), no long-lived deploy token stored
+- API Worker: `inspection-api-staging` — `https://inspection-api-staging.savi-barbaral.workers.dev`, health check green at `/api/v1/health`
+- Admin Worker: `inspection-admin-staging` — `https://inspection-admin-staging.savi-barbaral.workers.dev`
+- Field Worker: `inspection-field-staging` — `https://inspection-field-staging.savi-barbaral.workers.dev`
+- Auto-deploy on push to `main`: verified working for all three
+- Production Workers: not created yet (no production Supabase/domain decided); `env.production` blocks are already in each `wrangler.jsonc`, ready for a separate Workers Builds project per app when promoted
+- Platform constraint discovered: Cloudflare Workers Builds pins a build pipeline to the exact Worker name it was created with and force-overrides `wrangler.jsonc`'s name on mismatch (ignores `--env` too) — each environment needs its own Workers Builds project, not a single project deploying to multiple named Workers via `--env`
+- Date: 2026-09-11
 
 ## Human-only blockers
 
