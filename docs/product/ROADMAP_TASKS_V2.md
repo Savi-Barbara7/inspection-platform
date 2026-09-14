@@ -30,17 +30,21 @@ Entregar: organizations, memberships, RLS, owner inicial, fixtures Org A/B, cros
 
 Gate: Tenant B não lê/altera/infere dados de A.
 
-## Task 05 — Capability Authorization
+## Task 05 — Capability Authorization ✅ concluída (+ Task 05.1 hardening)
 
 Entregar: capability registry, `authorize()` central, roles e testes.
 
-Capabilities iniciais: `organization.members.manage`, `technical_model.read`, `organization_model.create/customize/publish`, `job.create/assign/edit/review/approve`, `evidence.upload/organize/delete`, `report.render/issue/supersede`, `signature.request`, `billing.manage`.
+Capabilities iniciais: `organization.members.manage`, `organization.settings.manage`, `technical_model.read`, `organization_model.create/customize/publish`, `job.create/assign/edit/review/approve`, `evidence.upload/organize/delete`, `report.render/issue/supersede`, `signature.request`, `billing.manage`, `audit.read`.
 
 Gate: nada crítico depende de role checks espalhados na UI.
 
-## Task 06 — Audit Baseline
+Task 05.1 (pós-revisão de segurança): fechou escalada de privilégio em `organization_memberships`, protegeu colunas internas de `organizations` via RPC (`update_organization_settings`), validação de UUID nas rotas, higiene de grants (`EXECUTE` de `anon` revogado em toda RPC exposta — ver docs/security/AUTHORIZATION.md).
+
+## Task 06 — Audit Baseline ✅ concluída
 
 Entregar: `audit_events` append-only, `AuditService`, request_id, actor, resource, payload redigido, eventos administrativos.
+
+Entregue: tabela `audit_events` + RLS + `record_audit_event()` (RPC, actor sempre derivado de `auth.uid()`), port `AuditService` em `packages/domain/src/audit`, adapter Supabase, rota `GET /api/v1/organizations/:id/audit-events` (capability `audit.read`, owner/admin). Instrumentado em `organization.created`/`organization.updated` (fluxos reais já existentes) como prova do núcleo — demais categorias (membership, model, job, evidence, review, signature, report, overrides) reusam o mesmo core quando suas tasks chegarem. Ver `docs/domain/AUDIT.md`.
 
 Gate: ações críticas auditáveis sem vazar dados sensíveis.
 

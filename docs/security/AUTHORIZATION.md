@@ -61,6 +61,7 @@ Nunca decidir autorização por nome de role fora desse registro.
 | report.supersede             |   ✓   |   ✓   |                  |             |           |          |           ✓           |               |        |
 | signature.request            |   ✓   |   ✓   |                  |             |           |          |           ✓           |               |        |
 | billing.manage               |   ✓   |       |                  |             |           |          |                       |       ✓       |        |
+| audit.read                   |   ✓   |   ✓   |                  |             |           |          |                       |               |        |
 
 Racional: `owner`/`admin` cobrem operação completa (billing fica só com
 `owner` + `billing_admin`, nunca `admin`, para separar "roda a operação" de
@@ -73,9 +74,13 @@ Model. `coordinator` distribui e revisa trabalho; `inspector` executa e
 coleta evidência do seu próprio job; `reviewer` só revisa; `technical_responsible`
 detém `report.issue`/`report.supersede`/`signature.request` como parte de
 seu papel de assinar e emitir/supersede o documento. `viewer` é somente
-leitura. Esta matriz é o ponto de partida (Task 05) e pode ser refinada
-quando tarefas futuras (07+) exigirem granularidade maior — sempre via este
-registro, nunca via checagem de role solta em rota ou UI.
+leitura. `audit.read` (Task 06) protege `GET /api/v1/organizations/:id/audit-events`
+e é deliberadamente restrita a `owner`/`admin` em v1 — a trilha de auditoria
+é dado administrativo sensível; RLS já permite SELECT a qualquer membro
+ativo (`is_org_member`), então essa capability é o que efetivamente decide
+quem acessa a rota HTTP. Esta matriz é o ponto de partida (Task 05) e pode
+ser refinada quando tarefas futuras (07+) exigirem granularidade maior —
+sempre via este registro, nunca via checagem de role solta em rota ou UI.
 
 ### `report.issue` não é o mesmo que responsabilidade técnica (assinatura)
 

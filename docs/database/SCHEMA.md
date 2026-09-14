@@ -5,6 +5,7 @@ Este documento define a primeira modelagem. Migrations reais devem respeitar est
 ## Core tenant
 
 ### organizations
+
 - id uuid pk
 - slug text unique
 - legal_name text
@@ -15,6 +16,7 @@ Este documento define a primeira modelagem. Migrations reais devem respeitar est
 - updated_at timestamptz
 
 ### organization_memberships
+
 - id uuid pk
 - organization_id uuid fk
 - user_id uuid
@@ -25,6 +27,7 @@ Este documento define a primeira modelagem. Migrations reais devem respeitar est
 - created_at timestamptz
 
 ### customers
+
 - id uuid pk
 - organization_id uuid fk
 - name text
@@ -32,6 +35,7 @@ Este documento define a primeira modelagem. Migrations reais devem respeitar est
 - timestamps
 
 ### contacts
+
 - id uuid pk
 - organization_id uuid fk
 - customer_id uuid fk
@@ -41,6 +45,7 @@ Este documento define a primeira modelagem. Migrations reais devem respeitar est
 - metadata jsonb
 
 ### sites
+
 - id uuid pk
 - organization_id uuid fk
 - customer_id uuid null
@@ -51,6 +56,7 @@ Este documento define a primeira modelagem. Migrations reais devem respeitar est
 - metadata jsonb
 
 ### assets
+
 - id uuid pk
 - organization_id uuid fk
 - site_id uuid null
@@ -63,6 +69,7 @@ Este documento define a primeira modelagem. Migrations reais devem respeitar est
 ## Templates
 
 ### inspection_templates
+
 - id uuid pk
 - organization_id uuid fk
 - name text
@@ -73,6 +80,7 @@ Este documento define a primeira modelagem. Migrations reais devem respeitar est
 - timestamps
 
 ### inspection_template_versions
+
 - id uuid pk
 - organization_id uuid fk
 - template_id uuid fk
@@ -88,11 +96,13 @@ Este documento define a primeira modelagem. Migrations reais devem respeitar est
 - unique(template_id, version)
 
 ### report_templates / report_template_versions
+
 Mesma estratégia de identidade + versões imutáveis.
 
 ## Inspections
 
 ### inspections
+
 - id uuid pk
 - organization_id uuid fk
 - customer_id uuid null
@@ -113,6 +123,7 @@ Mesma estratégia de identidade + versões imutáveis.
 - timestamps
 
 ### inspection_assignments
+
 - id uuid pk
 - organization_id uuid fk
 - inspection_id uuid fk
@@ -123,6 +134,7 @@ Mesma estratégia de identidade + versões imutáveis.
 ## Evidence
 
 ### evidence
+
 - id uuid pk
 - organization_id uuid fk
 - inspection_id uuid fk
@@ -147,6 +159,7 @@ Mesma estratégia de identidade + versões imutáveis.
 ## Findings
 
 ### findings
+
 - id uuid pk
 - organization_id uuid fk
 - inspection_id uuid fk
@@ -162,6 +175,7 @@ Mesma estratégia de identidade + versões imutáveis.
 ## Reports
 
 ### reports
+
 - id uuid pk
 - organization_id uuid fk
 - inspection_id uuid fk
@@ -170,6 +184,7 @@ Mesma estratégia de identidade + versões imutáveis.
 - timestamps
 
 ### report_versions
+
 - id uuid pk
 - organization_id uuid fk
 - report_id uuid fk
@@ -189,7 +204,21 @@ Mesma estratégia de identidade + versões imutáveis.
 
 ## Audit / integration / billing
 
-- audit_events
+### audit_events (Task 06)
+
+- id uuid pk
+- organization_id uuid fk -> organizations
+- actor_user_id uuid fk -> auth.users, null
+- action text
+- entity_type text
+- entity_id uuid null
+- metadata jsonb
+- before_data jsonb null
+- after_data jsonb null
+- request_id uuid null
+- created_at timestamptz
+- append-only: no UPDATE/DELETE policy or grant for authenticated/anon; written only via `record_audit_event()` (SECURITY DEFINER)
+
 - outbox_events
 - webhook_endpoints
 - webhook_deliveries
