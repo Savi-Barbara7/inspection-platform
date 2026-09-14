@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { OrganizationSlugConflictError, type OrganizationsRepository } from "@inspection-platform/domain/organizations";
+import { ROLE_CAPABILITIES, type MembershipLookup } from "@inspection-platform/domain/authorization";
 import { requireAuth } from "../middleware/auth";
 import type { AppEnv } from "../types";
 
@@ -43,7 +44,10 @@ function notFoundError(requestId: string) {
   };
 }
 
-export function createOrganizationsRoutes(getRepository: (env: AppEnv["Bindings"]) => OrganizationsRepository) {
+export function createOrganizationsRoutes(
+  getRepository: (env: AppEnv["Bindings"]) => OrganizationsRepository,
+  getMembershipLookup: (env: AppEnv["Bindings"]) => MembershipLookup
+) {
   const routes = new Hono<AppEnv>();
 
   routes.post("/", requireAuth, async (c) => {
@@ -91,6 +95,14 @@ export function createOrganizationsRoutes(getRepository: (env: AppEnv["Bindings"
       return c.json(notFoundError(c.get("requestId")), 404);
     }
     return c.json(organization);
+  });
+
+  routes.get("/:id/membership", requireAuth, async (c) => {
+    const membership = await getMembershipLookup(c.env).getActiveMembership(c.get("authToken")!, c.req.param("id"));
+    if (!membership) {
+      return c.json(notFoundError(c.get("requestId")), 404);
+    }
+    return c.json({ role: membership.role, capabilities: ROLE_CAPABILITIES[membership.role] });
   });
 
   return routes;

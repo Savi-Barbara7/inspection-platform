@@ -40,6 +40,24 @@
 - FOUNDATION_CHECKLIST.md section G (multi-tenant gate) fully checked — Template Engine (Task 08+) may proceed
 - Date: 2026-09-14
 
+## Local (Task 03.5 + post-Task-04 doc revision — domain & Phase 1 catalog)
+
+- Domain realigned to TechnicalModel → OrganizationModel → TechnicalJob → Report (ADR-0017)
+- Phase 1 catalog fixed at **14 models** (`docs/product/technical-models/PHASE1_CATALOG.md`); prior 20+ SST/industrial research relabeled `future_catalog`
+- `docs/product/PDF_OUTPUT_DESIGN_SPEC.md`: PDF is an independent editorial product, never a UI capture
+- `docs/product/ROADMAP_TASKS_V2.md` is the authoritative backlog from Task 05 onward
+- Date: 2026-09-14
+
+## Local (Task 05 — Capability Authorization)
+
+- `packages/domain/src/authorization`: `Capability` union (18 capabilities), `ROLE_CAPABILITIES` matrix for all 9 roles, pure `authorize()` — exhaustively unit tested
+- `apps/api`: `createSupabaseMembershipLookup` adapter (forwards caller's own token, never service_role) + `requireCapability` Hono middleware (401/404/403 paths tested in isolation)
+- `GET /api/v1/organizations/:id/membership` — real endpoint returning the caller's own role + derived capabilities; proves the pipeline end-to-end
+- Matrix documented in `docs/security/AUTHORIZATION.md` with rationale
+- Verified against real local Supabase (fictitious users): owner gets full capability list from a freshly created org; a non-member gets 404 on the same endpoint
+- 31 tests total (8 domain + 23 API), all green; no migrations needed (capabilities are application-layer only per ADR-0004)
+- Date: 2026-09-14
+
 ## GitHub
 
 - Workspace: personal account `Savi-Barbara7` (no organization existed; none created per "não criar organização nova só por estética")

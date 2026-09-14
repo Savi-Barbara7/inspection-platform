@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { createSupabaseAuthProvider } from "./auth/supabase-auth-provider";
+import { createSupabaseMembershipLookup } from "./authorization/supabase-membership-lookup";
 import { requireAuth, withAuth } from "./middleware/auth";
 import { createOrganizationsRoutes } from "./organizations/routes";
 import { createSupabaseOrganizationsRepository } from "./organizations/supabase-organizations-repository";
@@ -34,8 +35,9 @@ app.get("/api/v1/me", requireAuth, (c) => {
 
 app.route(
   "/api/v1/organizations",
-  createOrganizationsRoutes((env) =>
-    createSupabaseOrganizationsRepository(env.SUPABASE_URL ?? "", env.SUPABASE_PUBLISHABLE_KEY ?? "")
+  createOrganizationsRoutes(
+    (env) => createSupabaseOrganizationsRepository(env.SUPABASE_URL ?? "", env.SUPABASE_PUBLISHABLE_KEY ?? ""),
+    (env) => createSupabaseMembershipLookup(env.SUPABASE_URL ?? "", env.SUPABASE_PUBLISHABLE_KEY ?? "")
   )
 );
 

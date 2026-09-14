@@ -8,7 +8,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./identity": "./src/identity/index.ts",
-    "./organizations": "./src/organizations/index.ts"
+    "./organizations": "./src/organizations/index.ts",
+    "./authorization": "./src/authorization/index.ts"
   },
   "scripts": {
     "build": "tsc --noEmit",
