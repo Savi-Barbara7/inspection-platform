@@ -21,6 +21,15 @@
 - Local dev machine has no Docker Desktop; verified instead with Colima (documented gap — owner should install Docker Desktop or keep using Colima per `docs/SETUP_BEFORE_CODING.md`)
 - Date: 2026-09-14
 
+## Local (Task 03 — Authentication Boundary)
+
+- `packages/domain` identity module: `CurrentUser` type + `AuthProvider` port (no infra dependency)
+- `apps/api`: Supabase Auth adapter (`/auth/v1/user`, publishable key only, never service_role), `withAuth`/`requireAuth` middleware, `GET /api/v1/me`
+- Verified against real local Supabase Auth (fictitious signup) via `wrangler dev`, not just mocks
+- Verified on `inspection-api-staging` after deploy: anonymous `/api/v1/me` → 401, `/api/v1/health` unaffected
+- No organizations/memberships/tenant rules yet — that starts at Task 04
+- Date: 2026-09-14
+
 ## GitHub
 
 - Workspace: personal account `Savi-Barbara7` (no organization existed; none created per "não criar organização nova só por estética")
