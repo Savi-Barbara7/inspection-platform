@@ -11,6 +11,8 @@ import { createSitesRoutes } from "./sites/routes";
 import { createSupabaseSitesRepository } from "./sites/supabase-sites-repository";
 import { createAssetsRoutes } from "./assets/routes";
 import { createSupabaseAssetsRepository } from "./assets/supabase-assets-repository";
+import { createTechnicalModelsRoutes } from "./technical-models/routes";
+import { createSupabaseTechnicalModelsRepository } from "./technical-models/supabase-technical-models-repository";
 import type { AppEnv } from "./types";
 
 const app = new Hono<AppEnv>();
@@ -86,6 +88,16 @@ app.route(
     (env) =>
       createSupabaseMembershipLookup(env.SUPABASE_URL ?? "", env.SUPABASE_PUBLISHABLE_KEY ?? ""),
     (env) => createSupabaseAuditService(env.SUPABASE_URL ?? "", env.SUPABASE_PUBLISHABLE_KEY ?? "")
+  )
+);
+
+app.route(
+  "/api/v1/technical-models",
+  createTechnicalModelsRoutes((env) =>
+    createSupabaseTechnicalModelsRepository(
+      env.SUPABASE_URL ?? "",
+      env.SUPABASE_PUBLISHABLE_KEY ?? ""
+    )
   )
 );
 
