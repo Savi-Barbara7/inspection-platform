@@ -3,7 +3,7 @@
 -- Fictitious fixtures only.
 
 begin;
-select plan(16);
+select plan(28);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures: Org A (owned by User A) and Org B (owned by User B)
@@ -12,7 +12,8 @@ select plan(16);
 insert into auth.users (id, email)
 values
   ('00000000-0000-0000-0000-00000000000a', 'org-a-owner@example.test'),
-  ('00000000-0000-0000-0000-00000000000b', 'org-b-owner@example.test');
+  ('00000000-0000-0000-0000-00000000000b', 'org-b-owner@example.test'),
+  ('00000000-0000-0000-0000-00000000000c', 'org-a-admin@example.test');
 
 insert into public.organizations (id, slug, display_name)
 values
@@ -22,7 +23,8 @@ values
 insert into public.organization_memberships (organization_id, user_id, role, status, joined_at)
 values
   ('10000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-00000000000a', 'owner', 'active', now()),
-  ('10000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-00000000000b', 'owner', 'active', now());
+  ('10000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-00000000000b', 'owner', 'active', now()),
+  ('10000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-00000000000c', 'admin', 'active', now());
 
 -- ---------------------------------------------------------------------------
 -- As User A: SELECT is scoped to Org A only
@@ -43,13 +45,13 @@ select is(
   'User A selects only their own membership row'
 );
 
--- Cross-tenant UPDATE: matches zero rows, does not error.
-update public.organizations set display_name = 'hacked-by-a' where id = '10000000-0000-0000-0000-000000000002';
-
-select is(
-  (select count(*)::int from public.organizations where id = '10000000-0000-0000-0000-000000000002' and display_name = 'hacked-by-a'),
-  0,
-  'User A cannot UPDATE Org B (visible to User A: 0 rows)'
+-- Cross-tenant UPDATE: rejected outright, since the UPDATE grant itself
+-- has been revoked from authenticated (Task 05.1 Section 3).
+select throws_ok(
+  $$ update public.organizations set display_name = 'hacked-by-a' where id = '10000000-0000-0000-0000-000000000002' $$,
+  '42501',
+  null,
+  'User A cannot UPDATE Org B directly (grant revoked, in addition to being invisible via RLS)'
 );
 
 -- Cross-tenant DELETE: matches zero rows, does not error.
@@ -72,13 +74,72 @@ select throws_ok(
   'User A cannot INSERT a membership into Org B'
 );
 
--- Owner can update their own organization.
-update public.organizations set display_name = 'Org A renamed' where id = '10000000-0000-0000-0000-000000000001';
+-- Direct UPDATE on organizations is never allowed anymore, even for your
+-- own tenant and even for columns the app intends to expose (Task 05.1
+-- Section 3): the grant itself is revoked, so this fails at the privilege
+-- check, before RLS is even evaluated.
+select throws_ok(
+  $$ update public.organizations set display_name = 'hacked-direct' where id = '10000000-0000-0000-0000-000000000001' $$,
+  '42501',
+  null,
+  'User A (owner) cannot UPDATE Org A directly -- must use update_organization_settings()'
+);
+
+-- Internal columns are equally unreachable, proving this isn't just a
+-- display_name-shaped hole.
+select throws_ok(
+  $$ update public.organizations set status = 'suspended' where id = '10000000-0000-0000-0000-000000000001' $$,
+  '42501',
+  null,
+  'User A (owner) cannot alter internal columns (status) directly'
+);
+
+select throws_ok(
+  $$ update public.organizations set slug = 'stolen-slug' where id = '10000000-0000-0000-0000-000000000001' $$,
+  '42501',
+  null,
+  'User A (owner) cannot alter internal columns (slug) directly'
+);
+
+-- Owner can update their own organization through the sanctioned RPC.
+select is(
+  (select display_name from public.update_organization_settings('10000000-0000-0000-0000-000000000001', 'Org A renamed')),
+  'Org A renamed',
+  'User A (owner) can rename Org A via update_organization_settings()'
+);
 
 select is(
   (select display_name from public.organizations where id = '10000000-0000-0000-0000-000000000001'),
   'Org A renamed',
-  'User A (owner) can UPDATE Org A'
+  'update_organization_settings() actually persisted the new display_name'
+);
+
+-- p_update_legal_name=true lets the owner explicitly clear legal_name to null.
+select is(
+  (select legal_name from public.update_organization_settings('10000000-0000-0000-0000-000000000001', null, null, true)),
+  null,
+  'update_organization_settings() can explicitly clear legal_name to null'
+);
+
+-- Cross-tenant: User A cannot use the RPC against Org B either -- it
+-- re-checks has_org_role() itself since SECURITY DEFINER bypasses RLS.
+select throws_ok(
+  $$ select public.update_organization_settings('10000000-0000-0000-0000-000000000002', 'hacked-via-rpc') $$,
+  '42501',
+  null,
+  'User A cannot use update_organization_settings() against Org B'
+);
+
+-- Membership rows can no longer be updated directly by anyone, including
+-- the owner acting on their own organization's rows (Task 05.1 Section 1):
+-- the policy was removed entirely, so this fails at the privilege check.
+select throws_ok(
+  $$ update public.organization_memberships set role = 'admin'
+     where organization_id = '10000000-0000-0000-0000-000000000001'
+       and user_id = '00000000-0000-0000-0000-00000000000a' $$,
+  '42501',
+  null,
+  'User A (owner) cannot UPDATE their own membership row directly (no member-management RPC yet)'
 );
 
 -- create_organization() creates a new org and an owner membership, atomically, for the caller.
@@ -92,6 +153,63 @@ select is(
   (select role from public.organization_memberships where organization_id = (select id from public.organizations where slug = 'org-a2')),
   'owner',
   'create_organization() makes the caller the owner'
+);
+
+-- ---------------------------------------------------------------------------
+-- As User C (admin of Org A): privilege escalation must be impossible
+-- (Task 05.1 Section 1). There is no member-management feature yet, so
+-- ALL direct membership UPDATEs are rejected -- this also covers the
+-- specific escalation paths the user should never be able to reach: an
+-- admin promoting themselves to owner, and an admin demoting/removing the
+-- owner.
+-- ---------------------------------------------------------------------------
+
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-00000000000c","role":"authenticated"}', true);
+
+select throws_ok(
+  $$ update public.organization_memberships set role = 'owner'
+     where organization_id = '10000000-0000-0000-0000-000000000001'
+       and user_id = '00000000-0000-0000-0000-00000000000c' $$,
+  '42501',
+  null,
+  'Admin (User C) cannot promote themselves to owner'
+);
+
+select throws_ok(
+  $$ update public.organization_memberships set role = 'admin'
+     where organization_id = '10000000-0000-0000-0000-000000000001'
+       and user_id = '00000000-0000-0000-0000-00000000000a' $$,
+  '42501',
+  null,
+  'Admin (User C) cannot demote the owner (User A)'
+);
+
+select throws_ok(
+  $$ update public.organization_memberships set status = 'removed'
+     where organization_id = '10000000-0000-0000-0000-000000000001'
+       and user_id = '00000000-0000-0000-0000-00000000000a' $$,
+  '42501',
+  null,
+  'Admin (User C) cannot remove the owner (User A)'
+);
+
+-- No DELETE policy exists on organization_memberships, so RLS filters the
+-- owner's row out of the USING clause entirely: the DELETE matches zero
+-- rows and does not error (same "matches zero rows, no error" shape as
+-- the pre-existing cross-tenant UPDATE/DELETE tests on organizations).
+-- User C cannot SELECT the owner's row either (self-row-only SELECT
+-- policy), so the actual proof that it survived is deferred to the
+-- privileged-role check at the end of this file.
+delete from public.organization_memberships
+where organization_id = '10000000-0000-0000-0000-000000000001'
+  and user_id = '00000000-0000-0000-0000-00000000000a';
+
+-- Admin can still update the organization (owner/admin capability, unaffected
+-- by the membership hardening) through the sanctioned RPC.
+select is(
+  (select display_name from public.update_organization_settings('10000000-0000-0000-0000-000000000001', 'Org A renamed by admin')),
+  'Org A renamed by admin',
+  'Admin (User C) can still rename Org A via update_organization_settings()'
 );
 
 -- ---------------------------------------------------------------------------
@@ -112,12 +230,11 @@ select is(
   'User B selects only their own membership row'
 );
 
-update public.organizations set display_name = 'hacked-by-b' where id = '10000000-0000-0000-0000-000000000001';
-
-select is(
-  (select count(*)::int from public.organizations where id = '10000000-0000-0000-0000-000000000001' and display_name = 'hacked-by-b'),
-  0,
-  'User B cannot UPDATE Org A (visible to User B: 0 rows)'
+select throws_ok(
+  $$ update public.organizations set display_name = 'hacked-by-b' where id = '10000000-0000-0000-0000-000000000001' $$,
+  '42501',
+  null,
+  'User B cannot UPDATE Org A directly (grant revoked, in addition to being invisible via RLS)'
 );
 
 select throws_ok(
@@ -139,8 +256,8 @@ reset role;
 
 select is(
   (select display_name from public.organizations where id = '10000000-0000-0000-0000-000000000001'),
-  'Org A renamed',
-  'Org A was never renamed by User B and was never deleted'
+  'Org A renamed by admin',
+  'Org A was never renamed by User B and was never deleted (last legitimate rename was by the admin, via RPC)'
 );
 
 select is(
@@ -157,8 +274,17 @@ select is(
 
 select is(
   (select count(*)::int from public.organization_memberships),
-  3,
-  'No cross-tenant membership row was ever inserted (only the two owner rows plus the create_organization() one)'
+  4,
+  'No cross-tenant membership row was ever inserted, and the owner''s row was never altered/removed by the admin '
+  '(the two owner rows, the Org A admin row, plus the create_organization() one)'
+);
+
+select is(
+  (select role from public.organization_memberships
+   where organization_id = '10000000-0000-0000-0000-000000000001'
+     and user_id = '00000000-0000-0000-0000-00000000000a'),
+  'owner',
+  'User A is still owner of Org A -- the admin''s escalation attempts never took effect'
 );
 
 select * from finish();
