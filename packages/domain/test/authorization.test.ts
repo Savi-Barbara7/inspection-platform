@@ -26,7 +26,8 @@ const ALL_CAPABILITIES: Capability[] = [
   "report.issue",
   "report.supersede",
   "signature.request",
-  "billing.manage"
+  "billing.manage",
+  "audit.read"
 ];
 
 describe("authorize()", () => {
@@ -66,11 +67,12 @@ describe("authorize()", () => {
     }
   });
 
-  it("only owner/admin can manage members, organization settings, or delete evidence", () => {
+  it("only owner/admin can manage members, organization settings, delete evidence, or read the audit trail", () => {
     const sensitive: Capability[] = [
       "organization.members.manage",
       "organization.settings.manage",
-      "evidence.delete"
+      "evidence.delete",
+      "audit.read"
     ];
     for (const role of ALL_ROLES) {
       for (const capability of sensitive) {

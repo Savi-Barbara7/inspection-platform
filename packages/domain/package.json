@@ -9,7 +9,8 @@
     ".": "./src/index.ts",
     "./identity": "./src/identity/index.ts",
     "./organizations": "./src/organizations/index.ts",
-    "./authorization": "./src/authorization/index.ts"
+    "./authorization": "./src/authorization/index.ts",
+    "./audit": "./src/audit/index.ts"
   },
   "scripts": {
     "build": "tsc --noEmit",

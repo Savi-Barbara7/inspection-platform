@@ -26,7 +26,8 @@ export type Capability =
   | "report.issue"
   | "report.supersede"
   | "signature.request"
-  | "billing.manage";
+  | "billing.manage"
+  | "audit.read";
 
 /**
  * Role -> capability matrix. This is the single source of truth for "what
@@ -54,7 +55,8 @@ export const ROLE_CAPABILITIES: Readonly<Record<MembershipRole, readonly Capabil
     "report.issue",
     "report.supersede",
     "signature.request",
-    "billing.manage"
+    "billing.manage",
+    "audit.read"
   ],
   admin: [
     "organization.members.manage",
@@ -74,7 +76,8 @@ export const ROLE_CAPABILITIES: Readonly<Record<MembershipRole, readonly Capabil
     "report.render",
     "report.issue",
     "report.supersede",
-    "signature.request"
+    "signature.request",
+    "audit.read"
   ],
   template_manager: [
     "technical_model.read",

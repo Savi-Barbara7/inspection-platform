@@ -1,3 +1,59 @@
-// Audit events append-only.
-// Boundary intentionally empty until the corresponding task in FIRST_12_TASKS.md is executed.
-export {};
+// Append-only business audit trail. See docs/domain/AUDIT.md and ADR-0012.
+//
+// This is the reusable core for Task 06 — only wired up for two real
+// actions so far (organization.created/updated). Add a new AuditAction /
+// AuditEntityType value only when a real call site emits it in the same
+// change; do not pre-populate this file with every future category.
+
+export type AuditAction = "organization.created" | "organization.updated";
+
+export type AuditEntityType = "organization";
+
+export interface AuditEvent {
+  id: string;
+  organizationId: string;
+  /** Null only for a future system/background-triggered event; never trust a client-supplied actor. */
+  actorUserId: string | null;
+  action: AuditAction;
+  entityType: AuditEntityType;
+  entityId: string | null;
+  metadata: Record<string, unknown>;
+  beforeData: Record<string, unknown> | null;
+  afterData: Record<string, unknown> | null;
+  requestId: string | null;
+  createdAt: string;
+}
+
+export interface RecordAuditEventInput {
+  organizationId: string;
+  action: AuditAction;
+  entityType: AuditEntityType;
+  entityId?: string | undefined;
+  metadata?: Record<string, unknown> | undefined;
+  beforeData?: Record<string, unknown> | undefined;
+  afterData?: Record<string, unknown> | undefined;
+  requestId?: string | undefined;
+}
+
+export interface AuditEventsQuery {
+  entityType?: string | undefined;
+  entityId?: string | undefined;
+  limit?: number | undefined;
+}
+
+/**
+ * Port implemented by an infrastructure adapter (Supabase/Postgres in
+ * apps/api). Every call is scoped to the acting user's own credential —
+ * never a service-role bypass — so Postgres RLS enforces tenant isolation
+ * as the second line of defense behind application authorization. Never
+ * pass secrets (passwords, tokens, API keys) or unnecessary personal data
+ * into metadata/beforeData/afterData.
+ */
+export interface AuditService {
+  record(authToken: string, input: RecordAuditEventInput): Promise<AuditEvent>;
+  listByOrganization(
+    authToken: string,
+    organizationId: string,
+    query?: AuditEventsQuery
+  ): Promise<AuditEvent[]>;
+}
