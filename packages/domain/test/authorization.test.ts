@@ -1,9 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { ROLE_CAPABILITIES, authorize, type Capability, type MembershipRole } from "../src/authorization";
+import {
+  ROLE_CAPABILITIES,
+  authorize,
+  type Capability,
+  type MembershipRole
+} from "../src/authorization";
 
 const ALL_ROLES = Object.keys(ROLE_CAPABILITIES) as MembershipRole[];
 const ALL_CAPABILITIES: Capability[] = [
   "organization.members.manage",
+  "organization.settings.manage",
   "technical_model.read",
   "organization_model.create",
   "organization_model.customize",
@@ -60,8 +66,12 @@ describe("authorize()", () => {
     }
   });
 
-  it("only owner/admin can manage members or delete evidence", () => {
-    const sensitive: Capability[] = ["organization.members.manage", "evidence.delete"];
+  it("only owner/admin can manage members, organization settings, or delete evidence", () => {
+    const sensitive: Capability[] = [
+      "organization.members.manage",
+      "organization.settings.manage",
+      "evidence.delete"
+    ];
     for (const role of ALL_ROLES) {
       for (const capability of sensitive) {
         const expected = role === "owner" || role === "admin";

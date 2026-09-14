@@ -9,6 +9,7 @@ import type { MembershipRole } from "../organizations";
 
 export type Capability =
   | "organization.members.manage"
+  | "organization.settings.manage"
   | "technical_model.read"
   | "organization_model.create"
   | "organization_model.customize"
@@ -36,6 +37,7 @@ export type Capability =
 export const ROLE_CAPABILITIES: Readonly<Record<MembershipRole, readonly Capability[]>> = {
   owner: [
     "organization.members.manage",
+    "organization.settings.manage",
     "technical_model.read",
     "organization_model.create",
     "organization_model.customize",
@@ -56,6 +58,7 @@ export const ROLE_CAPABILITIES: Readonly<Record<MembershipRole, readonly Capabil
   ],
   admin: [
     "organization.members.manage",
+    "organization.settings.manage",
     "technical_model.read",
     "organization_model.create",
     "organization_model.customize",
