@@ -179,3 +179,45 @@ Auditado: `.gitignore` raiz já cobre `node_modules/`, `dist/`, `.turbo/`,
 `git ls-files` confirma que nenhum desses artefatos, nem `apps/api/.dev.vars`,
 nunca foi commitado — só `.dev.vars.example`/`.env.example`, que contêm
 apenas placeholders fictícios. Nenhum secret real foi encontrado versionado.
+
+### 6. EXECUTE grants em funções de `public` — comportamento e regra
+
+**Comportamento observado do Supabase/Postgres:** este projeto define, via
+`pg_default_acl`, que toda função nova criada por `postgres` no schema
+`public` recebe `EXECUTE` automaticamente para `anon`, `authenticated` e
+`service_role` no momento do `CREATE FUNCTION` — antes de qualquer
+`GRANT`/`REVOKE` explícito rodar depois, no restante da mesma migration.
+Isso pegou `create_organization()`, `update_organization_settings()` e
+`set_updated_at()` de surpresa: um `revoke all on function ... from public`
+logo após o `CREATE FUNCTION` **não** remove esses grants, porque eles
+foram feitos diretamente a `anon`/`authenticated`/`service_role` (roles
+nomeados), não ao pseudo-role `PUBLIC` — `REVOKE ... FROM PUBLIC` só afeta
+o que foi concedido a `PUBLIC`. Corrigido para as três funções em
+`20260914160000_revoke_anon_execute_update_organization_settings.sql`,
+`20260914170000_revoke_anon_execute_create_organization.sql` e
+`20260914180000_revoke_execute_set_updated_at.sql`.
+
+**Regra de desenvolvimento:** toda nova RPC/função exposta em `public`
+deve declarar/revisar explicitamente seus `EXECUTE` grants **na mesma
+migration** que a cria — nunca assumir que o grant padrão do projeto está
+correto para o caso de uso. Para uma função `authenticated`-only, isso
+significa, logo após o `CREATE FUNCTION`: `revoke execute ... from anon,
+public;` (ou `revoke all ... from public;` seguido de um `revoke execute
+... from anon;` **explícito**, já que o primeiro sozinho não basta).
+
+**Teste genérico de regressão:** existe em
+`supabase/tests/organizations_cross_tenant_test.sql` um assert que lista,
+via `has_function_privilege('anon', ...)`, todas as funções de `public`
+executáveis por `anon` e compara contra uma allow-list explícita (hoje:
+só `has_org_role`/`is_org_member`, os helpers de predicado de RLS, que
+precisam ser executáveis por `anon`/`authenticated` para as próprias
+policies de RLS conseguirem avaliar as próprias queries). Uma função nova
+que ganhe `EXECUTE` de `anon` sem estar nessa lista quebra o teste
+imediatamente, em vez de passar despercebida — foi esse teste que pegou o
+caso do `set_updated_at()` nesta mesma revisão. Esse teste genérico é
+suficiente e não é frágil porque depende só de um fato objetivo do
+catálogo (`has_function_privilege`), não de heurística sobre o corpo da
+função; mantemos, além dele, os testes explícitos por função (grant +
+comportamento) já que provam coisas que o teste genérico não prova
+(que `authenticated` legítimo continua funcionando, que a negação
+acontece pelo motivo certo, etc.).

@@ -3,7 +3,7 @@
 -- Fictitious fixtures only.
 
 begin;
-select plan(37);
+select plan(41);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures: Org A (owned by User A) and Org B (owned by User B)
@@ -57,6 +57,62 @@ select is(
   has_function_privilege('authenticated', 'public.update_organization_settings(uuid,text,text,boolean)', 'EXECUTE'),
   true,
   'authenticated has EXECUTE on update_organization_settings()'
+);
+
+-- ---------------------------------------------------------------------------
+-- Task 05.1 follow-up: same check for create_organization() -- the same
+-- pg_default_acl exposure applied here too (see
+-- 20260914170000_revoke_anon_execute_create_organization.sql).
+-- ---------------------------------------------------------------------------
+
+select is(
+  has_function_privilege('anon', 'public.create_organization(text,text,text)', 'EXECUTE'),
+  false,
+  'anon has no EXECUTE on create_organization()'
+);
+
+select is(
+  has_function_privilege('authenticated', 'public.create_organization(text,text,text)', 'EXECUTE'),
+  true,
+  'authenticated has EXECUTE on create_organization()'
+);
+
+-- Behavioral proof, not just the catalog fact: anon is denied at the
+-- privilege check, before the function body (and its own auth.uid()
+-- check) is ever reached.
+set local role anon;
+
+select throws_ok(
+  $$ select public.create_organization('anon-cannot-create', 'Anon Cannot Create') $$,
+  '42501',
+  null,
+  'anon cannot call create_organization() directly (no EXECUTE grant)'
+);
+
+reset role;
+
+-- ---------------------------------------------------------------------------
+-- Task 05.1 Section 2 (generic regression guard): no public-schema
+-- function should gain anon EXECUTE except the two RLS predicate helpers,
+-- which anon/authenticated need in order for RLS policies to evaluate at
+-- all (they are invoker-rights, read-only, and return only a boolean --
+-- see docs/security/AUTHORIZATION.md). If this ever fails, a new function
+-- picked up an unreviewed anon grant (most likely via pg_default_acl on
+-- CREATE FUNCTION) -- update the allow-list only after confirming that
+-- grant is actually intended, not by reflex.
+-- ---------------------------------------------------------------------------
+
+select is(
+  (
+    select coalesce(array_agg(p.proname::text order by p.proname), array[]::text[])
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public'
+      and has_function_privilege('anon', p.oid, 'EXECUTE')
+  ),
+  array['has_org_role', 'is_org_member'],
+  'Only the RLS predicate helpers are executable by anon -- any other public-schema function '
+  'gaining anon EXECUTE must be added here explicitly, never silently'
 );
 
 -- ---------------------------------------------------------------------------
