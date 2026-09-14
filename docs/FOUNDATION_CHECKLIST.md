@@ -4,44 +4,44 @@ O agente é responsável por executar e marcar estes itens. A proprietária não
 
 ## A. Discovery e governança
 
-- [ ] inventário GitHub/Cloudflare/Supabase realizado sem mutações destrutivas
-- [ ] codinome provisório aplicado
-- [ ] repositório privado criado/selecionado
-- [ ] `main` protegida com o máximo suportado pelo plano atual
-- [ ] PR/checks obrigatórios configurados quando suportados
-- [ ] CODEOWNERS configurado
-- [ ] secret scanning/Dependabot habilitados quando disponíveis
-- [ ] nenhuma credencial registrada no Git/chat/log
+- [x] inventário GitHub/Cloudflare/Supabase realizado sem mutações destrutivas
+- [x] codinome provisório aplicado (`inspection-platform`)
+- [x] repositório privado criado/selecionado
+- [ ] `main` protegida com o máximo suportado pelo plano atual — **gap**: branch protection/rulesets exigem GitHub Pro em repo privado (ver PROVISIONING_STATE.md)
+- [ ] PR/checks obrigatórios configurados quando suportados — mesmo gap acima
+- [x] CODEOWNERS configurado
+- [x] secret scanning/Dependabot habilitados quando disponíveis — Dependabot sim; secret scanning indisponível em repo privado no plano Free (gap registrado)
+- [x] nenhuma credencial registrada no Git/chat/log
 
 ## B. Tooling
 
-- [ ] Node/runtime e pnpm fixados
-- [ ] workspace/Turborepo configurados
-- [ ] TypeScript strict
-- [ ] ESLint/Prettier
-- [ ] Vitest
-- [ ] `.env.example` sem valores
-- [ ] scripts `dev`, `test`, `lint`, `typecheck`, `build` padronizados
+- [x] Node/runtime e pnpm fixados
+- [x] workspace/Turborepo configurados
+- [x] TypeScript strict
+- [x] ESLint/Prettier
+- [x] Vitest
+- [x] `.env.example` sem valores
+- [x] scripts `dev`, `test`, `lint`, `typecheck`, `build` padronizados
 
 ## C. Supabase
 
-- [ ] staging criado em `sa-east-1`
-- [ ] production separado criado se o plano atual permitir sem compra
-- [ ] Auth baseline configurado
-- [ ] Storage privado configurado
-- [ ] migrations são source of truth
-- [ ] RLS strategy documentada
-- [ ] service-role fora de frontend/Git
+- [x] staging criado em `sa-east-1`
+- [ ] production separado criado se o plano atual permitir sem compra — adiado deliberadamente até a fase de promoção (ver ADR/AUTONOMOUS_BOOTSTRAP.md)
+- [ ] Auth baseline configurado (Task 03)
+- [ ] Storage privado configurado (Task 12)
+- [x] migrations são source of truth (`supabase/migrations`, Task 02)
+- [x] RLS strategy documentada (`docs/database/RLS.md`; implementação começa na Task 04)
+- [x] service-role fora de frontend/Git
 
 ## D. Cloudflare
 
-- [ ] Workers escolhido para novos deploys
-- [ ] GitHub integration/Workers Builds configurado
-- [ ] preview build disponível
-- [ ] staging Worker(s) configurado(s)
-- [ ] `wrangler.jsonc` versionado
-- [ ] secrets em mecanismo próprio de secrets, não `vars`
-- [ ] health check staging funcionando
+- [x] Workers escolhido para novos deploys
+- [x] GitHub integration/Workers Builds configurado
+- [ ] preview build disponível — não verificado ainda
+- [x] staging Worker(s) configurado(s) (`inspection-api-staging`, `inspection-admin-staging`, `inspection-field-staging`)
+- [x] `wrangler.jsonc` versionado
+- [ ] secrets em mecanismo próprio de secrets, não `vars` — ainda não há secrets a configurar
+- [x] health check staging funcionando
 
 ## E. Arquitetura, segurança e privacidade
 
@@ -55,13 +55,13 @@ O agente é responsável por executar e marcar estes itens. A proprietária não
 
 ## F. CI/CD
 
-- [ ] lint
-- [ ] typecheck
-- [ ] unit tests
-- [ ] build
-- [ ] checks de segurança disponíveis
-- [ ] deploy/preview não expõe secrets
-- [ ] staging saudável
+- [x] lint
+- [x] typecheck
+- [x] unit tests
+- [x] build
+- [x] checks de segurança disponíveis (Dependabot alerts + automated security fixes)
+- [x] deploy/preview não expõe secrets
+- [x] staging saudável
 
 ## G. Gate multi-tenant antes do Template Engine
 

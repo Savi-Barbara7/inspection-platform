@@ -1,0 +1,9 @@
+-- Seed data for local development only. Runs after every `supabase db reset`.
+--
+-- Rules (see AGENTS.md and FOUNDATION_CHECKLIST.md):
+--   * fictitious data only — never copy real tenant, customer or personal data;
+--   * safe to run repeatedly against an empty database;
+--   * no secrets, no production identifiers.
+--
+-- No tables exist yet (Task 02 only builds the migration harness). Fixtures for
+-- Org A / Org B and the cross-tenant test matrix land in Task 04.
