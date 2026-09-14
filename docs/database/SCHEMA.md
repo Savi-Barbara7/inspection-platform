@@ -26,45 +26,48 @@ Este documento define a primeira modelagem. Migrations reais devem respeitar est
 - joined_at timestamptz null
 - created_at timestamptz
 
-### customers
+### customers (Task 07 — implemented, see docs/domain/CUSTOMERS_SITES_ASSETS.md)
 
 - id uuid pk
-- organization_id uuid fk
-- name text
-- metadata jsonb
-- timestamps
-
-### contacts
-
-- id uuid pk
-- organization_id uuid fk
-- customer_id uuid fk
-- name text
+- organization_id uuid fk -> organizations
+- display_name text
+- legal_name text null
+- document_number text null (free text -- no CPF/CNPJ format validation baked in)
 - email text null
 - phone text null
-- metadata jsonb
+- notes text null
+- archived_at timestamptz null (no hard delete; NULL = active)
+- created_at, updated_at timestamptz
+- unique(id, organization_id) -- referenced by sites' composite FK
 
-### sites
+No `contacts` table yet -- out of scope for Task 07; `email`/`phone` on customers cover the immediate need.
 
-- id uuid pk
-- organization_id uuid fk
-- customer_id uuid null
-- name text
-- address jsonb
-- latitude numeric null
-- longitude numeric null
-- metadata jsonb
-
-### assets
+### sites (Task 07 — implemented)
 
 - id uuid pk
-- organization_id uuid fk
-- site_id uuid null
-- customer_id uuid null
-- asset_type text
+- organization_id uuid fk -> organizations
+- customer_id uuid **not null**, fk (customer_id, organization_id) -> customers(id, organization_id) -- tenant-safe composite FK, a site can never reference a customer from another organization
 - name text
-- external_ref text null
-- metadata jsonb
+- reference_code text null
+- address jsonb (structured: street/number/complement/neighborhood/city/region/postalCode/country, all optional)
+- notes text null
+- archived_at timestamptz null
+- created_at, updated_at timestamptz
+- unique(id, organization_id) -- referenced by assets' composite FK
+
+### assets (Task 07 — implemented)
+
+- id uuid pk
+- organization_id uuid fk -> organizations
+- site_id uuid **not null**, fk (site_id, organization_id) -> sites(id, organization_id)
+- parent_asset_id uuid null, fk (parent_asset_id, site_id) -> assets(id, site_id) -- a parent must be in the same site; NULL parent (top-level asset) skips the check
+- name text
+- code text null
+- asset_type text (free text, no CHECK constraint -- extensible, typed as a closed union at the TS layer)
+- notes text null
+- archived_at timestamptz null
+- created_at, updated_at timestamptz
+- unique(id, site_id)
 
 ## Templates
 

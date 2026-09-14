@@ -48,11 +48,13 @@ Entregue: tabela `audit_events` + RLS + `record_audit_event()` (RPC, actor sempr
 
 Gate: ações críticas auditáveis sem vazar dados sensíveis.
 
-## Task 07 — Customers / Sites / Assets
+## Task 07 — Customers / Sites / Assets ✅ concluída
 
 Entregar: customers, contacts, sites, assets, RLS, CRUD mínima, autorização.
 
 Regra: não criar tabelas core como `obra`, `apartamento`, `caldeira` ou `lindeiro`.
+
+Entregue: `customers`/`sites`/`assets` (sem `contacts` -- fora de escopo, `email`/`phone` no customer bastam por ora), RLS com composite tenant-safe foreign keys (`sites.customer_id`, `assets.site_id`, `assets.parent_asset_id` nunca podem cruzar organização/site, mesmo com `organization_id` internamente consistente na linha filha), archive (sem hard delete), capabilities `customer/site/asset.read/manage`, API REST top-level (`organizationId` como query param, sem nested routes), busca via `ILIKE`, audit events (`created/updated/archived` para as três entidades). Ver `docs/domain/CUSTOMERS_SITES_ASSETS.md`.
 
 Gate: mesma estrutura suporta múltiplas verticais.
 

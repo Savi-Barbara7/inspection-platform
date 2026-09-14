@@ -62,6 +62,12 @@ Nunca decidir autorização por nome de role fora desse registro.
 | signature.request            |   ✓   |   ✓   |                  |             |           |          |           ✓           |               |        |
 | billing.manage               |   ✓   |       |                  |             |           |          |                       |       ✓       |        |
 | audit.read                   |   ✓   |   ✓   |                  |             |           |          |                       |               |        |
+| customer.read                |   ✓   |   ✓   |                  |      ✓      |     ✓     |    ✓     |           ✓           |               |   ✓    |
+| customer.manage              |   ✓   |   ✓   |                  |      ✓      |           |          |                       |               |        |
+| site.read                    |   ✓   |   ✓   |                  |      ✓      |     ✓     |    ✓     |           ✓           |               |   ✓    |
+| site.manage                  |   ✓   |   ✓   |                  |      ✓      |           |          |                       |               |        |
+| asset.read                   |   ✓   |   ✓   |                  |      ✓      |     ✓     |    ✓     |           ✓           |               |   ✓    |
+| asset.manage                 |   ✓   |   ✓   |                  |      ✓      |           |          |                       |               |        |
 
 Racional: `owner`/`admin` cobrem operação completa (billing fica só com
 `owner` + `billing_admin`, nunca `admin`, para separar "roda a operação" de
@@ -78,7 +84,16 @@ leitura. `audit.read` (Task 06) protege `GET /api/v1/organizations/:id/audit-eve
 e é deliberadamente restrita a `owner`/`admin` em v1 — a trilha de auditoria
 é dado administrativo sensível; RLS já permite SELECT a qualquer membro
 ativo (`is_org_member`), então essa capability é o que efetivamente decide
-quem acessa a rota HTTP. Esta matriz é o ponto de partida (Task 05) e pode
+quem acessa a rota HTTP. `customer.manage`/`site.manage`/`asset.manage`
+(Task 07) cobrem create+update+archive (sem split mais fino) e vão para
+`owner`/`admin`/`coordinator` — `coordinator` porque é quem distribui
+trabalho e precisa poder cadastrar o cliente/local/ativo antes de criar um
+job. `customer.read`/`site.read`/`asset.read` vão para esses três mais
+`inspector`/`reviewer`/`technical_responsible`/`viewer` — todo mundo que
+precisa saber a qual cliente/local/ativo um job se refere, exceto
+`template_manager` e `billing_admin`, cujo escopo permanece isolado
+(ciclo de vida do Organization Model e billing, respectivamente). Esta
+matriz é o ponto de partida (Task 05) e pode
 ser refinada quando tarefas futuras (07+) exigirem granularidade maior —
 sempre via este registro, nunca via checagem de role solta em rota ou UI.
 

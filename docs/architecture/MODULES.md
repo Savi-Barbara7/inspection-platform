@@ -10,11 +10,11 @@ Organizations, memberships, teams e business units.
 
 ## Customers
 
-Customers e contacts do tenant.
+O cliente/contratante do tenant (Task 07). `packages/domain/src/customers` (port) + `apps/api/src/customers` (Supabase adapter). Sem `Contact` ainda -- fora de escopo da Task 07. Ver docs/domain/CUSTOMERS_SITES_ASSETS.md.
 
 ## Sites & Assets
 
-Locais e ativos inspecionáveis.
+Locais e ativos inspecionáveis (Task 07). `packages/domain/src/sites-assets` (port, cobre ambas as entidades) + `apps/api/src/sites` e `apps/api/src/assets` (Supabase adapters, rotas HTTP separadas). Ver docs/domain/CUSTOMERS_SITES_ASSETS.md.
 
 ## Templates
 
