@@ -11,6 +11,7 @@ const ALL_CAPABILITIES: Capability[] = [
   "organization.members.manage",
   "organization.settings.manage",
   "technical_model.read",
+  "organization_model.read",
   "organization_model.create",
   "organization_model.customize",
   "organization_model.publish",
@@ -62,6 +63,7 @@ describe("authorize()", () => {
   it("viewer only reads, never mutates", () => {
     const viewerReads: Capability[] = [
       "technical_model.read",
+      "organization_model.read",
       "customer.read",
       "site.read",
       "asset.read"

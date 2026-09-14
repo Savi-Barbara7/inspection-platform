@@ -13,7 +13,8 @@
     "./audit": "./src/audit/index.ts",
     "./customers": "./src/customers/index.ts",
     "./sites-assets": "./src/sites-assets/index.ts",
-    "./templates": "./src/templates/index.ts"
+    "./templates": "./src/templates/index.ts",
+    "./organization-models": "./src/organization-models/index.ts"
   },
   "scripts": {
     "build": "tsc --noEmit",

@@ -17,9 +17,20 @@ export type AuditAction =
   | "site.archived"
   | "asset.created"
   | "asset.updated"
-  | "asset.archived";
+  | "asset.archived"
+  | "organization_model.created"
+  | "organization_model.updated"
+  | "organization_model.archived"
+  | "organization_model_version.created"
+  | "organization_model_version.updated";
 
-export type AuditEntityType = "organization" | "customer" | "site" | "asset";
+export type AuditEntityType =
+  | "organization"
+  | "customer"
+  | "site"
+  | "asset"
+  | "organization_model"
+  | "organization_model_version";
 
 export interface AuditEvent {
   id: string;

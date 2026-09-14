@@ -17,6 +17,18 @@
 // is a Zod `.strict()` object, so an unknown/extra field (e.g. an
 // attempted `html`/`__proto__` escape hatch) is rejected deterministically
 // rather than silently ignored or passed through.
+//
+// Schema vs. runtime data: a DocumentDefinition (whether on a
+// TechnicalModelVersion or an OrganizationModelVersion) describes
+// STRUCTURE only — sections/blocks, field definitions, labels, types,
+// required-ness, layout, defaults/sample content, and presentation
+// config. It never holds a real answer produced during an actual
+// inspection (a filled-in field value, a completed table row, a
+// finding, an uploaded photo/evidence reference, a signature capture).
+// Those belong to a future TechnicalJob runtime record (not built yet)
+// that fills in an instance of this structure — see fields explicitly
+// named `defaultValue`/`sampleRows` below, never `value`/`rows`, to keep
+// that boundary unambiguous at the type level.
 
 import { z } from "zod";
 
@@ -69,7 +81,11 @@ const textBlockSchema = z
     title: z.string().trim().min(1).max(200).optional(),
     // Plain text only (line breaks allowed within the string) — never
     // HTML/markup. A future renderer decides presentation; this block
-    // never carries markup of its own.
+    // never carries markup of its own. Controlled rich text (bold,
+    // lists, etc.) is a future extension point: it would arrive as a
+    // structured JSON shape (e.g. a `richContent` field of typed nodes)
+    // gated behind a bump of CURRENT_DEFINITION_SCHEMA_VERSION — never
+    // as raw HTML/script content on this or any other field.
     content: z.string().max(20000)
   })
   .strict();
@@ -79,7 +95,11 @@ const technicalInformationFieldSchema = z
     id: idSchema,
     label: z.string().trim().min(1).max(200),
     fieldType: z.enum(["text", "number", "date", "boolean"]),
-    value: z.string().max(2000).optional()
+    required: z.boolean().optional(),
+    // A config-time default/sample shown in the field, never a real
+    // answer captured during an actual inspection — see this file's
+    // top-of-file "Schema vs. runtime data" note.
+    defaultValue: z.string().max(2000).optional()
   })
   .strict();
 
@@ -98,7 +118,14 @@ const tableBlockSchema = z
     type: z.literal("Table"),
     title: z.string().trim().min(1).max(200).optional(),
     columns: z.array(z.string().max(200)).max(50),
-    rows: z.array(z.array(z.string().max(2000)).max(50)).max(1000)
+    // Illustrative/template content baked into the definition (e.g. a
+    // fixed reference table, or sample rows shown while editing) —
+    // never real rows entered during an actual inspection job. See this
+    // file's top-of-file "Schema vs. runtime data" note.
+    sampleRows: z
+      .array(z.array(z.string().max(2000)).max(50))
+      .max(1000)
+      .optional()
   })
   .strict();
 
@@ -109,7 +136,11 @@ const importedTableBlockSchema = z
     title: z.string().trim().min(1).max(200).optional(),
     sourceFileName: z.string().max(300).optional(),
     columns: z.array(z.string().max(200)).max(200),
-    rows: z.array(z.array(z.string().max(2000)).max(200)).max(5000)
+    // Same "never real job data" rule as Table.sampleRows above.
+    sampleRows: z
+      .array(z.array(z.string().max(2000)).max(200))
+      .max(5000)
+      .optional()
   })
   .strict();
 

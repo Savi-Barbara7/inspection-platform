@@ -11,6 +11,8 @@
 //     that's honest, not a contradiction (see docs/domain/TEMPLATES.md
 //     "Research status vs editorial status").
 
+import type { DocumentDefinition } from "./blocks";
+
 export * from "./blocks";
 
 export type TechnicalModelCategory =
@@ -109,6 +111,9 @@ export interface TechnicalModelVersion {
   /** Version-level override of the model's own jurisdictionScope; null means "inherit the model's". */
   jurisdictionScope: string | null;
   professionalScope: ProfessionalScope;
+  /** The starting structure an OrganizationModel derivation copies (Task 10) — never a blank document. See docs/domain/TEMPLATES.md. */
+  definition: DocumentDefinition;
+  definitionSchemaVersion: number;
   createdAt: string;
   publishedAt: string | null;
   supersededAt: string | null;

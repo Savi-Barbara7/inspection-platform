@@ -149,10 +149,12 @@ describe("validateDocumentDefinition()", () => {
       TableOfContents: {},
       Text: { content: "texto" },
       TechnicalInformation: {
-        fields: [{ id: "f1", label: "Data", fieldType: "date", value: "2026-09-14" }]
+        fields: [
+          { id: "f1", label: "Data", fieldType: "date", required: true, defaultValue: "2026-09-14" }
+        ]
       },
-      Table: { columns: ["A", "B"], rows: [["1", "2"]] },
-      ImportedTable: { columns: ["A"], rows: [["1"]], sourceFileName: "planilha.xlsx" },
+      Table: { columns: ["A", "B"], sampleRows: [["1", "2"]] },
+      ImportedTable: { columns: ["A"], sampleRows: [["1"]], sourceFileName: "planilha.xlsx" },
       PhotoSection: { layout: "grid" },
       DocumentAttachment: { required: true },
       Findings: { severityLevels: ["baixa", "média", "alta"] },
@@ -209,7 +211,7 @@ describe("validateDocumentDefinition()", () => {
                 { id: generateBlockId(), label: "Data da vistoria", fieldType: "date" }
               ]
             },
-            { id: generateBlockId(), type: "Table", columns: ["Sistema", "Condição"], rows: [] }
+            { id: generateBlockId(), type: "Table", columns: ["Sistema", "Condição"] }
           ]
         },
         {

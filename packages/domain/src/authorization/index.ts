@@ -11,6 +11,7 @@ export type Capability =
   | "organization.members.manage"
   | "organization.settings.manage"
   | "technical_model.read"
+  | "organization_model.read"
   | "organization_model.create"
   | "organization_model.customize"
   | "organization_model.publish"
@@ -46,6 +47,7 @@ export const ROLE_CAPABILITIES: Readonly<Record<MembershipRole, readonly Capabil
     "organization.members.manage",
     "organization.settings.manage",
     "technical_model.read",
+    "organization_model.read",
     "organization_model.create",
     "organization_model.customize",
     "organization_model.publish",
@@ -74,6 +76,7 @@ export const ROLE_CAPABILITIES: Readonly<Record<MembershipRole, readonly Capabil
     "organization.members.manage",
     "organization.settings.manage",
     "technical_model.read",
+    "organization_model.read",
     "organization_model.create",
     "organization_model.customize",
     "organization_model.publish",
@@ -99,12 +102,14 @@ export const ROLE_CAPABILITIES: Readonly<Record<MembershipRole, readonly Capabil
   ],
   template_manager: [
     "technical_model.read",
+    "organization_model.read",
     "organization_model.create",
     "organization_model.customize",
     "organization_model.publish"
   ],
   coordinator: [
     "technical_model.read",
+    "organization_model.read",
     "job.create",
     "job.assign",
     "job.edit",
@@ -121,6 +126,7 @@ export const ROLE_CAPABILITIES: Readonly<Record<MembershipRole, readonly Capabil
   ],
   inspector: [
     "technical_model.read",
+    "organization_model.read",
     "job.edit",
     "evidence.upload",
     "evidence.organize",
@@ -130,6 +136,7 @@ export const ROLE_CAPABILITIES: Readonly<Record<MembershipRole, readonly Capabil
   ],
   reviewer: [
     "technical_model.read",
+    "organization_model.read",
     "job.review",
     "report.render",
     "customer.read",
@@ -138,6 +145,7 @@ export const ROLE_CAPABILITIES: Readonly<Record<MembershipRole, readonly Capabil
   ],
   technical_responsible: [
     "technical_model.read",
+    "organization_model.read",
     "job.approve",
     "report.render",
     "report.issue",
@@ -148,7 +156,13 @@ export const ROLE_CAPABILITIES: Readonly<Record<MembershipRole, readonly Capabil
     "asset.read"
   ],
   billing_admin: ["billing.manage"],
-  viewer: ["technical_model.read", "customer.read", "site.read", "asset.read"]
+  viewer: [
+    "technical_model.read",
+    "organization_model.read",
+    "customer.read",
+    "site.read",
+    "asset.read"
+  ]
 } as const;
 
 export interface ActiveMembership {
