@@ -3,7 +3,7 @@
 -- Fictitious fixtures only.
 
 begin;
-select plan(28);
+select plan(37);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures: Org A (owned by User A) and Org B (owned by User B)
@@ -13,7 +13,10 @@ insert into auth.users (id, email)
 values
   ('00000000-0000-0000-0000-00000000000a', 'org-a-owner@example.test'),
   ('00000000-0000-0000-0000-00000000000b', 'org-b-owner@example.test'),
-  ('00000000-0000-0000-0000-00000000000c', 'org-a-admin@example.test');
+  ('00000000-0000-0000-0000-00000000000c', 'org-a-admin@example.test'),
+  ('00000000-0000-0000-0000-00000000000d', 'org-a-inspector@example.test'),
+  ('00000000-0000-0000-0000-00000000000e', 'org-a-viewer@example.test'),
+  ('00000000-0000-0000-0000-00000000000f', 'no-membership-anywhere@example.test');
 
 insert into public.organizations (id, slug, display_name)
 values
@@ -24,7 +27,37 @@ insert into public.organization_memberships (organization_id, user_id, role, sta
 values
   ('10000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-00000000000a', 'owner', 'active', now()),
   ('10000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-00000000000b', 'owner', 'active', now()),
-  ('10000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-00000000000c', 'admin', 'active', now());
+  ('10000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-00000000000c', 'admin', 'active', now()),
+  ('10000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-00000000000d', 'inspector', 'active', now()),
+  ('10000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-00000000000e', 'viewer', 'active', now());
+-- User F (00000000-0000-0000-0000-00000000000f) is deliberately left with no
+-- membership row anywhere, to test the "authenticated but no membership"
+-- path against the RPC directly.
+
+-- ---------------------------------------------------------------------------
+-- Task 05.1 Section 2 verification: EXECUTE grants on the settings RPC.
+-- Checked as the privileged role that owns the connection before any
+-- `set local role`, since these are catalog-level facts, not RLS-gated
+-- data. Supabase's default privileges on the `public` schema grant
+-- EXECUTE on every *new* function directly to anon/authenticated/
+-- service_role at CREATE FUNCTION time (see pg_default_acl) -- this is
+-- why `revoke all on function ... from public` in the migration is not
+-- sufficient by itself: it only strips the PUBLIC pseudo-role's grant,
+-- not a grant made directly to a named role. These two assertions are
+-- the actual gate on the fix, not the SQL comment describing it.
+-- ---------------------------------------------------------------------------
+
+select is(
+  has_function_privilege('anon', 'public.update_organization_settings(uuid,text,text,boolean)', 'EXECUTE'),
+  false,
+  'anon has no EXECUTE on update_organization_settings()'
+);
+
+select is(
+  has_function_privilege('authenticated', 'public.update_organization_settings(uuid,text,text,boolean)', 'EXECUTE'),
+  true,
+  'authenticated has EXECUTE on update_organization_settings()'
+);
 
 -- ---------------------------------------------------------------------------
 -- As User A: SELECT is scoped to Org A only
@@ -142,6 +175,33 @@ select throws_ok(
   'User A (owner) cannot UPDATE their own membership row directly (no member-management RPC yet)'
 );
 
+-- Task 05.1 Section 4 (owner invariant) verification, same-tenant case:
+-- even the owner adding/removing rows in their OWN organization is
+-- blocked, not just cross-tenant -- there is no INSERT/DELETE policy on
+-- organization_memberships at all, regardless of tenant.
+select throws_ok(
+  $$ insert into public.organization_memberships (organization_id, user_id, role, status)
+     values ('10000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-00000000000a', 'admin', 'active') $$,
+  '42501',
+  null,
+  'User A (owner) cannot INSERT a second membership row for themselves in their own org'
+);
+
+delete from public.organization_memberships
+where organization_id = '10000000-0000-0000-0000-000000000001'
+  and user_id = '00000000-0000-0000-0000-00000000000a';
+
+-- User A can only SELECT their own row (RLS), so checking their own row
+-- still exists is the right (and only possible) check at this privilege
+-- level -- the global count is verified from a privileged role at the
+-- end of this file.
+select is(
+  (select count(*)::int from public.organization_memberships
+   where user_id = '00000000-0000-0000-0000-00000000000a'),
+  1,
+  'User A (owner) cannot DELETE their own membership row directly -- it still exists'
+);
+
 -- create_organization() creates a new org and an owner membership, atomically, for the caller.
 select isnt(
   (select id from public.create_organization('org-a2', 'Org A2', null)),
@@ -213,6 +273,41 @@ select is(
 );
 
 -- ---------------------------------------------------------------------------
+-- Task 05.1 Section 2 verification: update_organization_settings() calling
+-- role matrix. The RPC's own has_org_role() check must independently deny
+-- inspector, viewer, and a user with no membership at all -- the grant
+-- checked above only proves *who can call it*, not that calling it
+-- succeeds. All three call as themselves against Org A.
+-- ---------------------------------------------------------------------------
+
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-00000000000d","role":"authenticated"}', true);
+
+select throws_ok(
+  $$ select public.update_organization_settings('10000000-0000-0000-0000-000000000001', 'hacked-by-inspector') $$,
+  '42501',
+  null,
+  'Inspector cannot call update_organization_settings() on Org A'
+);
+
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-00000000000e","role":"authenticated"}', true);
+
+select throws_ok(
+  $$ select public.update_organization_settings('10000000-0000-0000-0000-000000000001', 'hacked-by-viewer') $$,
+  '42501',
+  null,
+  'Viewer cannot call update_organization_settings() on Org A'
+);
+
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-00000000000f","role":"authenticated"}', true);
+
+select throws_ok(
+  $$ select public.update_organization_settings('10000000-0000-0000-0000-000000000001', 'hacked-by-nobody') $$,
+  '42501',
+  null,
+  'An authenticated user with no membership anywhere cannot call update_organization_settings() on Org A'
+);
+
+-- ---------------------------------------------------------------------------
 -- As User B: proves isolation holds in the other direction too
 -- ---------------------------------------------------------------------------
 
@@ -274,9 +369,9 @@ select is(
 
 select is(
   (select count(*)::int from public.organization_memberships),
-  4,
-  'No cross-tenant membership row was ever inserted, and the owner''s row was never altered/removed by the admin '
-  '(the two owner rows, the Org A admin row, plus the create_organization() one)'
+  6,
+  'No cross-tenant membership row was ever inserted, and the owner''s row was never altered/removed '
+  '(2 owner rows + Org A admin/inspector/viewer rows + the create_organization() one)'
 );
 
 select is(
@@ -285,6 +380,31 @@ select is(
      and user_id = '00000000-0000-0000-0000-00000000000a'),
   'owner',
   'User A is still owner of Org A -- the admin''s escalation attempts never took effect'
+);
+
+-- ---------------------------------------------------------------------------
+-- Task 05.1 Section 4 verification: no other write path onto
+-- organization_memberships exists in the schema today. If this ever
+-- fails, a new trigger or function was added that can change role/status
+-- outside of create_organization() -- update this test deliberately, do
+-- not just bump the number.
+-- ---------------------------------------------------------------------------
+
+select is(
+  (select count(*)::int from pg_trigger
+   where tgrelid = 'public.organization_memberships'::regclass and not tgisinternal),
+  0,
+  'No trigger exists on organization_memberships that could mutate role/status as a side effect'
+);
+
+select is(
+  (select array_agg(p.proname::text order by p.proname)
+   from pg_proc p
+   join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'public' and p.prosrc ilike '%organization_membership%'),
+  array['create_organization', 'has_org_role', 'is_org_member'],
+  'Only create_organization()/has_org_role()/is_org_member() reference organization_memberships -- '
+  'no function exists that can change an existing row''s role/status'
 );
 
 select * from finish();

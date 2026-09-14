@@ -1,0 +1,30 @@
+-- Task 05.1 final security check (post-approval): a gap found while
+-- verifying EXECUTE grants on update_organization_settings().
+--
+-- This project's default privileges grant EXECUTE on every *new* function
+-- created in the `public` schema directly to anon/authenticated/service_role
+-- at CREATE FUNCTION time (see `pg_default_acl` -- `defaclrole = postgres`,
+-- `defaclnamespace = public`, `defaclobjtype = 'f'`). The previous migration
+-- (20260914150000_hardening_organization_authorization.sql) ran
+-- `revoke all on function ... from public`, which only strips a grant made
+-- to the PUBLIC pseudo-role -- it does nothing to a grant already made
+-- directly to a named role, which is exactly what the default privilege
+-- rule produces. Net effect: `anon` retained EXECUTE on
+-- update_organization_settings() despite that revoke statement.
+--
+-- The function's own `auth.uid() is null` check already made this
+-- unexploitable in practice (a genuinely anonymous PostgREST request has no
+-- JWT subject, so the function always raised 'authentication required'
+-- before touching any row), but least privilege says a role that never
+-- represents a signed-in user should not hold EXECUTE on an
+-- authenticated-only RPC at all. Confirmed empirically via
+-- has_function_privilege('anon', ...) against the local stack, and now
+-- covered by pgTAP in organizations_cross_tenant_test.sql so a regression
+-- (e.g. a future migration re-creating the function without this revoke)
+-- fails the test suite instead of going unnoticed.
+--
+-- create_organization() has the same underlying default-privilege exposure
+-- and is equally protected by its own `auth.uid() is null` check, but is
+-- out of scope for this pass -- flagged separately, not fixed here.
+
+revoke execute on function public.update_organization_settings(uuid, text, text, boolean) from anon;
