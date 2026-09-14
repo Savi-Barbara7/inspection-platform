@@ -38,6 +38,8 @@ type TechnicalModelVersionRow = {
   technical_basis: TechnicalModelVersion["technicalBasis"];
   jurisdiction_scope: string | null;
   professional_scope: TechnicalModelVersion["professionalScope"];
+  definition: TechnicalModelVersion["definition"];
+  definition_schema_version: number;
   created_at: string;
   published_at: string | null;
   superseded_at: string | null;
@@ -76,6 +78,8 @@ function toTechnicalModelVersion(row: TechnicalModelVersionRow): TechnicalModelV
     technicalBasis: row.technical_basis,
     jurisdictionScope: row.jurisdiction_scope,
     professionalScope: row.professional_scope,
+    definition: row.definition,
+    definitionSchemaVersion: row.definition_schema_version,
     createdAt: row.created_at,
     publishedAt: row.published_at,
     supersededAt: row.superseded_at
