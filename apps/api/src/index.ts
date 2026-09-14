@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { createSupabaseAuthProvider } from "./auth/supabase-auth-provider";
 import { createSupabaseMembershipLookup } from "./authorization/supabase-membership-lookup";
+import { createSupabaseAuditService } from "./audit/supabase-audit-service";
 import { requireAuth, withAuth } from "./middleware/auth";
 import { createOrganizationsRoutes } from "./organizations/routes";
 import { createSupabaseOrganizationsRepository } from "./organizations/supabase-organizations-repository";
@@ -17,7 +18,9 @@ app.use("*", async (c, next) => {
 
 app.use(
   "*",
-  withAuth((env) => createSupabaseAuthProvider(env.SUPABASE_URL ?? "", env.SUPABASE_PUBLISHABLE_KEY ?? ""))
+  withAuth((env) =>
+    createSupabaseAuthProvider(env.SUPABASE_URL ?? "", env.SUPABASE_PUBLISHABLE_KEY ?? "")
+  )
 );
 
 app.get("/api/v1/health", (c) => {
@@ -36,8 +39,14 @@ app.get("/api/v1/me", requireAuth, (c) => {
 app.route(
   "/api/v1/organizations",
   createOrganizationsRoutes(
-    (env) => createSupabaseOrganizationsRepository(env.SUPABASE_URL ?? "", env.SUPABASE_PUBLISHABLE_KEY ?? ""),
-    (env) => createSupabaseMembershipLookup(env.SUPABASE_URL ?? "", env.SUPABASE_PUBLISHABLE_KEY ?? "")
+    (env) =>
+      createSupabaseOrganizationsRepository(
+        env.SUPABASE_URL ?? "",
+        env.SUPABASE_PUBLISHABLE_KEY ?? ""
+      ),
+    (env) =>
+      createSupabaseMembershipLookup(env.SUPABASE_URL ?? "", env.SUPABASE_PUBLISHABLE_KEY ?? ""),
+    (env) => createSupabaseAuditService(env.SUPABASE_URL ?? "", env.SUPABASE_PUBLISHABLE_KEY ?? "")
   )
 );
 

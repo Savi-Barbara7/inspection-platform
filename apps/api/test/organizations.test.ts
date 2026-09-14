@@ -13,6 +13,8 @@ function stubFetch(handlers: {
   updateRpc?: (init: RequestInit) => Response;
   rest?: (url: string, init: RequestInit) => Response;
   membership?: (url: string, init: RequestInit) => Response;
+  auditRpc?: (init: RequestInit) => Response;
+  auditList?: (url: string, init: RequestInit) => Response;
 }) {
   vi.stubGlobal(
     "fetch",
@@ -32,6 +34,17 @@ function stubFetch(handlers: {
         handlers.updateRpc
       ) {
         return handlers.updateRpc(init);
+      }
+      // Default no-op success unless a test wants to assert on the audit
+      // call itself -- create/update recording is best-effort and most
+      // tests here aren't about audit, so this keeps them quiet.
+      if (url.startsWith(`${env.SUPABASE_URL}/rest/v1/rpc/record_audit_event`)) {
+        return handlers.auditRpc
+          ? handlers.auditRpc(init)
+          : new Response(JSON.stringify({ id: "audit-event-1" }), { status: 200 });
+      }
+      if (url.startsWith(`${env.SUPABASE_URL}/rest/v1/audit_events`) && handlers.auditList) {
+        return handlers.auditList(url, init);
       }
       if (
         url.startsWith(`${env.SUPABASE_URL}/rest/v1/organization_memberships`) &&
@@ -128,6 +141,59 @@ describe("POST /api/v1/organizations", () => {
       slug: "acme-inspections",
       displayName: "Acme Inspections"
     });
+  });
+
+  it("records an organization.created audit event with the caller's own token", async () => {
+    // recordAuditEventBestEffort catches everything, including a failed
+    // expect() inside this handler -- so assertions must be captured here
+    // and checked *outside* the request, or a broken payload would be
+    // silently swallowed and the test would still pass.
+    let capturedPayload: Record<string, unknown> | undefined;
+    stubFetch({
+      rpc: () => new Response(JSON.stringify(organizationRow), { status: 201 }),
+      auditRpc: (init) => {
+        capturedPayload = JSON.parse(init.body as string);
+        return new Response(JSON.stringify({ id: "audit-event-1" }), { status: 200 });
+      }
+    });
+
+    const res = await app.request(
+      "/api/v1/organizations",
+      {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({ slug: "acme-inspections", displayName: "Acme Inspections" })
+      },
+      env
+    );
+
+    expect(res.status).toBe(201);
+    expect(capturedPayload).toMatchObject({
+      p_organization_id: orgId,
+      p_action: "organization.created",
+      p_entity_type: "organization",
+      p_entity_id: orgId
+    });
+    expect(capturedPayload?.p_after_data).toMatchObject({ id: orgId, slug: "acme-inspections" });
+  });
+
+  it("still returns 201 even when audit recording itself fails (best-effort, non-fatal)", async () => {
+    stubFetch({
+      rpc: () => new Response(JSON.stringify(organizationRow), { status: 201 }),
+      auditRpc: () => new Response(null, { status: 500 })
+    });
+
+    const res = await app.request(
+      "/api/v1/organizations",
+      {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({ slug: "acme-inspections", displayName: "Acme Inspections" })
+      },
+      env
+    );
+
+    expect(res.status).toBe(201);
   });
 
   it("returns 409 when the slug is already taken", async () => {
@@ -313,6 +379,153 @@ describe("PATCH /api/v1/organizations/:id", () => {
     );
 
     expect(res.status).toBe(404);
+  });
+
+  it("records an organization.updated audit event with the changed fields and no beforeData", async () => {
+    // See the organization.created test above for why assertions must be
+    // captured here and checked outside the request, not inlined in the
+    // handler (recordAuditEventBestEffort swallows any error it throws).
+    let capturedPayload: Record<string, unknown> | undefined;
+    stubFetch({
+      membership: membershipHandler("owner"),
+      updateRpc: () =>
+        new Response(JSON.stringify({ ...organizationRow, display_name: "Acme Renamed" }), {
+          status: 200
+        }),
+      auditRpc: (init) => {
+        capturedPayload = JSON.parse(init.body as string);
+        return new Response(JSON.stringify({ id: "audit-event-2" }), { status: 200 });
+      }
+    });
+
+    const res = await app.request(
+      `/api/v1/organizations/${orgId}`,
+      {
+        method: "PATCH",
+        headers: authHeaders,
+        body: JSON.stringify({ displayName: "Acme Renamed" })
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    expect(capturedPayload).toMatchObject({
+      p_organization_id: orgId,
+      p_action: "organization.updated",
+      p_entity_type: "organization",
+      p_entity_id: orgId,
+      p_before_data: null,
+      p_metadata: { fieldsChanged: ["displayName"] }
+    });
+    expect(capturedPayload?.p_after_data).toMatchObject({ displayName: "Acme Renamed" });
+  });
+});
+
+describe("GET /api/v1/organizations/:id/audit-events", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("rejects anonymous requests", async () => {
+    const res = await app.request(`/api/v1/organizations/${orgId}/audit-events`, {}, env);
+    expect(res.status).toBe(401);
+  });
+
+  it("rejects a malformed organization id", async () => {
+    stubFetch({});
+    const res = await app.request(
+      "/api/v1/organizations/not-a-uuid/audit-events",
+      { headers: authHeaders },
+      env
+    );
+    expect(res.status).toBe(422);
+  });
+
+  it("returns 404 when the caller has no active membership", async () => {
+    stubFetch({ membership: membershipHandler(null) });
+    const res = await app.request(
+      `/api/v1/organizations/${orgId}/audit-events`,
+      { headers: authHeaders },
+      env
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it.each([
+    "inspector",
+    "viewer",
+    "coordinator",
+    "template_manager",
+    "billing_admin",
+    "technical_responsible",
+    "reviewer"
+  ])("returns 403 when the caller is a %s (lacks audit.read)", async (role) => {
+    stubFetch({ membership: membershipHandler(role) });
+    const res = await app.request(
+      `/api/v1/organizations/${orgId}/audit-events`,
+      { headers: authHeaders },
+      env
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it.each(["owner", "admin"])(
+    "allows a %s to list the organization's audit events",
+    async (role) => {
+      stubFetch({
+        membership: membershipHandler(role),
+        auditList: (url) => {
+          expect(url).toContain(`organization_id=eq.${orgId}`);
+          return new Response(
+            JSON.stringify([
+              {
+                id: "audit-event-1",
+                organization_id: orgId,
+                actor_user_id: "user-123",
+                action: "organization.created",
+                entity_type: "organization",
+                entity_id: orgId,
+                metadata: {},
+                before_data: null,
+                after_data: { id: orgId },
+                request_id: null,
+                created_at: "2026-09-14T00:00:00.000Z"
+              }
+            ]),
+            { status: 200 }
+          );
+        }
+      });
+
+      const res = await app.request(
+        `/api/v1/organizations/${orgId}/audit-events`,
+        { headers: authHeaders },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { events: Array<{ action: string }> };
+      expect(body.events).toHaveLength(1);
+      expect(body.events[0]).toMatchObject({ action: "organization.created" });
+    }
+  );
+
+  it("forwards entityType/entityId/limit query params to the repository", async () => {
+    stubFetch({
+      membership: membershipHandler("owner"),
+      auditList: (url) => {
+        expect(url).toContain("entity_type=eq.organization");
+        expect(url).toContain(`entity_id=eq.${orgId}`);
+        expect(url).toContain("limit=10");
+        return new Response(JSON.stringify([]), { status: 200 });
+      }
+    });
+
+    const res = await app.request(
+      `/api/v1/organizations/${orgId}/audit-events?entityType=organization&entityId=${orgId}&limit=10`,
+      { headers: authHeaders },
+      env
+    );
+
+    expect(res.status).toBe(200);
   });
 });
 

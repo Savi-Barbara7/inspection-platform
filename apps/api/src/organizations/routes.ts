@@ -1,4 +1,4 @@
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { z } from "zod";
 import {
   OrganizationSlugConflictError,
@@ -8,17 +8,11 @@ import {
   ROLE_CAPABILITIES,
   type MembershipLookup
 } from "@inspection-platform/domain/authorization";
+import type { AuditService } from "@inspection-platform/domain/audit";
 import { requireAuth } from "../middleware/auth";
 import { requireCapability } from "../middleware/authorization";
+import { validateUuidParam } from "../lib/route-params";
 import type { AppEnv } from "../types";
-
-// organization_id is interpolated into PostgREST filter query strings and
-// RPC bodies further down the call chain (see
-// supabase-organizations-repository.ts) — reject anything that isn't a
-// well-formed UUID here, before it reaches the repository or the
-// membership lookup, so a malformed/adversarial route param never reaches
-// PostgREST at all.
-const organizationIdSchema = z.string().uuid();
 
 const slugSchema = z
   .string()
@@ -59,30 +53,32 @@ function notFoundError(requestId: string) {
   };
 }
 
-function invalidOrganizationIdError(requestId: string) {
-  return {
-    type: "validation_error",
-    title: "Invalid request",
-    status: 422,
-    requestId,
-    errors: [{ path: "id", message: "must be a valid UUID" }]
-  };
-}
+const validateOrganizationId = validateUuidParam("id");
 
-// Runs before any handler/other middleware that consumes the :id param, so
-// a malformed value 404s/403s nothing and never reaches a repository or
-// membership-lookup call built from it.
-async function validateOrganizationId(c: Context<AppEnv>, next: () => Promise<void>) {
-  const parsed = organizationIdSchema.safeParse(c.req.param("id"));
-  if (!parsed.success) {
-    return c.json(invalidOrganizationIdError(c.get("requestId")), 422);
+// Audit recording is deliberately non-fatal: a failure here must never
+// take down the underlying business action it's describing. Logs only the
+// error shape, never the event payload (which may include organization
+// display data) or any credential.
+async function recordAuditEventBestEffort(
+  auditService: AuditService,
+  authToken: string,
+  input: Parameters<AuditService["record"]>[1]
+) {
+  try {
+    await auditService.record(authToken, input);
+  } catch (err) {
+    console.error("audit_event_record_failed", {
+      action: input.action,
+      entityType: input.entityType,
+      message: err instanceof Error ? err.message : "unknown error"
+    });
   }
-  await next();
 }
 
 export function createOrganizationsRoutes(
   getRepository: (env: AppEnv["Bindings"]) => OrganizationsRepository,
-  getMembershipLookup: (env: AppEnv["Bindings"]) => MembershipLookup
+  getMembershipLookup: (env: AppEnv["Bindings"]) => MembershipLookup,
+  getAuditService: (env: AppEnv["Bindings"]) => AuditService
 ) {
   const routes = new Hono<AppEnv>();
 
@@ -93,7 +89,18 @@ export function createOrganizationsRoutes(
     }
 
     try {
-      const organization = await getRepository(c.env).create(c.get("authToken")!, parsed.data);
+      const authToken = c.get("authToken")!;
+      const organization = await getRepository(c.env).create(authToken, parsed.data);
+
+      await recordAuditEventBestEffort(getAuditService(c.env), authToken, {
+        organizationId: organization.id,
+        action: "organization.created",
+        entityType: "organization",
+        entityId: organization.id,
+        afterData: { ...organization },
+        requestId: c.get("requestId")
+      });
+
       return c.json(organization, 201);
     } catch (err) {
       if (err instanceof OrganizationSlugConflictError) {
@@ -138,14 +145,27 @@ export function createOrganizationsRoutes(
         return c.json(validationError(c.get("requestId"), parsed.error.issues), 422);
       }
 
-      const organization = await getRepository(c.env).update(
-        c.get("authToken")!,
-        c.req.param("id"),
-        parsed.data
-      );
+      const authToken = c.get("authToken")!;
+      const id = c.req.param("id");
+      const organization = await getRepository(c.env).update(authToken, id, parsed.data);
       if (!organization) {
         return c.json(notFoundError(c.get("requestId")), 404);
       }
+
+      // No beforeData: fetching the prior row would need an extra request
+      // this route otherwise has no reason to make. The changed fields are
+      // already visible in metadata, and afterData carries the full
+      // resulting row (already in hand from update()).
+      await recordAuditEventBestEffort(getAuditService(c.env), authToken, {
+        organizationId: id,
+        action: "organization.updated",
+        entityType: "organization",
+        entityId: id,
+        metadata: { fieldsChanged: Object.keys(parsed.data) },
+        afterData: { ...organization },
+        requestId: c.get("requestId")
+      });
+
       return c.json(organization);
     }
   );
@@ -160,6 +180,34 @@ export function createOrganizationsRoutes(
     }
     return c.json({ role: membership.role, capabilities: ROLE_CAPABILITIES[membership.role] });
   });
+
+  // Task 06: read-only view onto the organization's audit trail. RLS
+  // already scopes SELECT to org members; this capability narrows the
+  // HTTP surface further, to owner/admin only (see docs/security/AUTHORIZATION.md).
+  routes.get(
+    "/:id/audit-events",
+    requireAuth,
+    validateOrganizationId,
+    requireCapability("audit.read", getMembershipLookup, (c) => c.req.param("id")!),
+    async (c) => {
+      const entityType = c.req.query("entityType");
+      const entityId = c.req.query("entityId");
+      const limitParam = c.req.query("limit");
+      const limit = limitParam ? Number.parseInt(limitParam, 10) : undefined;
+
+      const events = await getAuditService(c.env).listByOrganization(
+        c.get("authToken")!,
+        c.req.param("id"),
+        {
+          entityType,
+          entityId,
+          limit: limit !== undefined && Number.isFinite(limit) ? limit : undefined
+        }
+      );
+
+      return c.json({ events });
+    }
+  );
 
   return routes;
 }
