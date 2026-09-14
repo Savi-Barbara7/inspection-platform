@@ -44,3 +44,6 @@ jobs:
 
       - name: Reset is reproducible from a clean state
         run: supabase db reset
+
+      - name: Cross-tenant RLS suite (pgTAP)
+        run: supabase test db

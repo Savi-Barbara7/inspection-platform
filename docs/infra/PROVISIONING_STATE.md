@@ -30,6 +30,16 @@
 - No organizations/memberships/tenant rules yet — that starts at Task 04
 - Date: 2026-09-14
 
+## Local (Task 04 — Organizations & Memberships, multi-tenant gate)
+
+- `organizations` + `organization_memberships` tables, RLS enabled on both, `is_org_member()`/`has_org_role()` helpers
+- Controlled creation only via `create_organization()` (security definer, atomic org + owner membership); no direct INSERT policy on either table; no DELETE policy on either table
+- `packages/domain` organizations module: `Organization`, `Membership`, `OrganizationsRepository` port
+- `apps/api`: Supabase/PostgREST adapter (forwards the caller's own token, never service_role) + `POST/GET/PATCH /api/v1/organizations`
+- Cross-tenant gate proven three ways: pgTAP suite (`supabase/tests/organizations_cross_tenant_test.sql`, 16 assertions, runs in CI via `supabase test db`), mocked API unit tests (16 total in `apps/api/test`), and a real end-to-end run (`wrangler dev` + two fictitious Supabase-authenticated users) showing User A gets 404 reading/patching Org B through the actual HTTP API
+- FOUNDATION_CHECKLIST.md section G (multi-tenant gate) fully checked — Template Engine (Task 08+) may proceed
+- Date: 2026-09-14
+
 ## GitHub
 
 - Workspace: personal account `Savi-Barbara7` (no organization existed; none created per "não criar organização nova só por estética")

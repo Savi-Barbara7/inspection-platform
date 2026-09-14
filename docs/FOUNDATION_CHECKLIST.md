@@ -65,13 +65,13 @@ O agente é responsável por executar e marcar estes itens. A proprietária não
 
 ## G. Gate multi-tenant antes do Template Engine
 
-- [ ] organizations/memberships implementadas
-- [ ] fixtures Org A/B
-- [ ] cross-tenant SELECT bloqueado
-- [ ] cross-tenant INSERT bloqueado
-- [ ] cross-tenant UPDATE bloqueado
-- [ ] cross-tenant DELETE bloqueado
-- [ ] testes executados automaticamente no CI
+- [x] organizations/memberships implementadas (Task 04, com RLS)
+- [x] fixtures Org A/B (`supabase/tests/organizations_cross_tenant_test.sql`)
+- [x] cross-tenant SELECT bloqueado
+- [x] cross-tenant INSERT bloqueado
+- [x] cross-tenant UPDATE bloqueado
+- [x] cross-tenant DELETE bloqueado
+- [x] testes executados automaticamente no CI (`supabase test db`, job `database`)
 
 ## Blockers humanos legítimos
 

@@ -16,8 +16,10 @@ export function withAuth(resolveProvider: (env: Bindings) => AuthProvider): Midd
 
     if (authHeader?.startsWith(BEARER_PREFIX)) {
       const token = authHeader.slice(BEARER_PREFIX.length).trim();
+      c.set("authToken", token || null);
       c.set("currentUser", token ? await resolveProvider(c.env).getUserFromToken(token) : null);
     } else {
+      c.set("authToken", null);
       c.set("currentUser", null);
     }
 

@@ -1,6 +1,8 @@
 import { Hono } from "hono";
 import { createSupabaseAuthProvider } from "./auth/supabase-auth-provider";
 import { requireAuth, withAuth } from "./middleware/auth";
+import { createOrganizationsRoutes } from "./organizations/routes";
+import { createSupabaseOrganizationsRepository } from "./organizations/supabase-organizations-repository";
 import type { AppEnv } from "./types";
 
 const app = new Hono<AppEnv>();
@@ -29,6 +31,13 @@ app.get("/api/v1/me", requireAuth, (c) => {
   const currentUser = c.get("currentUser")!;
   return c.json({ id: currentUser.id, email: currentUser.email });
 });
+
+app.route(
+  "/api/v1/organizations",
+  createOrganizationsRoutes((env) =>
+    createSupabaseOrganizationsRepository(env.SUPABASE_URL ?? "", env.SUPABASE_PUBLISHABLE_KEY ?? "")
+  )
+);
 
 app.notFound((c) => {
   return c.json(
