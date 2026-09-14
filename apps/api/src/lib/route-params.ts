@@ -29,3 +29,20 @@ export function validateUuidParam(paramName: string): MiddlewareHandler<AppEnv> 
     await next();
   };
 }
+
+/**
+ * Same as validateUuidParam, for a required query string param. Used by
+ * Task 07's top-level resources (customers/sites/assets), which are not
+ * nested under /organizations/:id — organizationId is instead an explicit
+ * query param on every route, validated here before it reaches
+ * requireCapability or a repository call.
+ */
+export function validateUuidQueryParam(paramName: string): MiddlewareHandler<AppEnv> {
+  return async (c: Context<AppEnv>, next) => {
+    const parsed = uuidSchema.safeParse(c.req.query(paramName));
+    if (!parsed.success) {
+      return c.json(invalidIdError(c.get("requestId"), paramName), 422);
+    }
+    await next();
+  };
+}

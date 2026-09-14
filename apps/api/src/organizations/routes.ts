@@ -12,7 +12,13 @@ import type { AuditService } from "@inspection-platform/domain/audit";
 import { requireAuth } from "../middleware/auth";
 import { requireCapability } from "../middleware/authorization";
 import { validateUuidParam } from "../lib/route-params";
+import { recordAuditEventBestEffort } from "../lib/audit-helpers";
+import { validationError, notFoundError as notFoundErrorBase } from "../lib/http-errors";
 import type { AppEnv } from "../types";
+
+function notFoundError(requestId: string) {
+  return notFoundErrorBase(requestId, "Organization not found");
+}
 
 const slugSchema = z
   .string()
@@ -33,47 +39,7 @@ const updateOrganizationSchema = z
   })
   .refine((data) => Object.keys(data).length > 0, { message: "at least one field is required" });
 
-function validationError(requestId: string, errors: z.ZodIssue[]) {
-  return {
-    type: "validation_error",
-    title: "Invalid request",
-    status: 422,
-    requestId,
-    errors: errors.map((e) => ({ path: e.path.join("."), message: e.message }))
-  };
-}
-
-function notFoundError(requestId: string) {
-  return {
-    type: "not_found",
-    title: "Organization not found",
-    status: 404,
-    requestId,
-    errors: []
-  };
-}
-
 const validateOrganizationId = validateUuidParam("id");
-
-// Audit recording is deliberately non-fatal: a failure here must never
-// take down the underlying business action it's describing. Logs only the
-// error shape, never the event payload (which may include organization
-// display data) or any credential.
-async function recordAuditEventBestEffort(
-  auditService: AuditService,
-  authToken: string,
-  input: Parameters<AuditService["record"]>[1]
-) {
-  try {
-    await auditService.record(authToken, input);
-  } catch (err) {
-    console.error("audit_event_record_failed", {
-      action: input.action,
-      entityType: input.entityType,
-      message: err instanceof Error ? err.message : "unknown error"
-    });
-  }
-}
 
 export function createOrganizationsRoutes(
   getRepository: (env: AppEnv["Bindings"]) => OrganizationsRepository,

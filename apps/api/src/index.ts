@@ -5,6 +5,12 @@ import { createSupabaseAuditService } from "./audit/supabase-audit-service";
 import { requireAuth, withAuth } from "./middleware/auth";
 import { createOrganizationsRoutes } from "./organizations/routes";
 import { createSupabaseOrganizationsRepository } from "./organizations/supabase-organizations-repository";
+import { createCustomersRoutes } from "./customers/routes";
+import { createSupabaseCustomersRepository } from "./customers/supabase-customers-repository";
+import { createSitesRoutes } from "./sites/routes";
+import { createSupabaseSitesRepository } from "./sites/supabase-sites-repository";
+import { createAssetsRoutes } from "./assets/routes";
+import { createSupabaseAssetsRepository } from "./assets/supabase-assets-repository";
 import type { AppEnv } from "./types";
 
 const app = new Hono<AppEnv>();
@@ -44,6 +50,39 @@ app.route(
         env.SUPABASE_URL ?? "",
         env.SUPABASE_PUBLISHABLE_KEY ?? ""
       ),
+    (env) =>
+      createSupabaseMembershipLookup(env.SUPABASE_URL ?? "", env.SUPABASE_PUBLISHABLE_KEY ?? ""),
+    (env) => createSupabaseAuditService(env.SUPABASE_URL ?? "", env.SUPABASE_PUBLISHABLE_KEY ?? "")
+  )
+);
+
+app.route(
+  "/api/v1/customers",
+  createCustomersRoutes(
+    (env) =>
+      createSupabaseCustomersRepository(env.SUPABASE_URL ?? "", env.SUPABASE_PUBLISHABLE_KEY ?? ""),
+    (env) =>
+      createSupabaseMembershipLookup(env.SUPABASE_URL ?? "", env.SUPABASE_PUBLISHABLE_KEY ?? ""),
+    (env) => createSupabaseAuditService(env.SUPABASE_URL ?? "", env.SUPABASE_PUBLISHABLE_KEY ?? "")
+  )
+);
+
+app.route(
+  "/api/v1/sites",
+  createSitesRoutes(
+    (env) =>
+      createSupabaseSitesRepository(env.SUPABASE_URL ?? "", env.SUPABASE_PUBLISHABLE_KEY ?? ""),
+    (env) =>
+      createSupabaseMembershipLookup(env.SUPABASE_URL ?? "", env.SUPABASE_PUBLISHABLE_KEY ?? ""),
+    (env) => createSupabaseAuditService(env.SUPABASE_URL ?? "", env.SUPABASE_PUBLISHABLE_KEY ?? "")
+  )
+);
+
+app.route(
+  "/api/v1/assets",
+  createAssetsRoutes(
+    (env) =>
+      createSupabaseAssetsRepository(env.SUPABASE_URL ?? "", env.SUPABASE_PUBLISHABLE_KEY ?? ""),
     (env) =>
       createSupabaseMembershipLookup(env.SUPABASE_URL ?? "", env.SUPABASE_PUBLISHABLE_KEY ?? ""),
     (env) => createSupabaseAuditService(env.SUPABASE_URL ?? "", env.SUPABASE_PUBLISHABLE_KEY ?? "")
