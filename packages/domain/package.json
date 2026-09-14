@@ -12,7 +12,8 @@
     "./authorization": "./src/authorization/index.ts",
     "./audit": "./src/audit/index.ts",
     "./customers": "./src/customers/index.ts",
-    "./sites-assets": "./src/sites-assets/index.ts"
+    "./sites-assets": "./src/sites-assets/index.ts",
+    "./templates": "./src/templates/index.ts"
   },
   "scripts": {
     "build": "tsc --noEmit",
