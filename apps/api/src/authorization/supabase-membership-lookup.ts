@@ -6,12 +6,18 @@ import type { ActiveMembership, MembershipLookup } from "@inspection-platform/do
  * RLS already scopes organization_memberships SELECT to `user_id =
  * auth.uid()`, so this only ever returns the caller's own row.
  */
-export function createSupabaseMembershipLookup(supabaseUrl: string, publishableKey: string): MembershipLookup {
+export function createSupabaseMembershipLookup(
+  supabaseUrl: string,
+  publishableKey: string
+): MembershipLookup {
   return {
-    async getActiveMembership(authToken: string, organizationId: string): Promise<ActiveMembership | null> {
+    async getActiveMembership(
+      authToken: string,
+      organizationId: string
+    ): Promise<ActiveMembership | null> {
       const url =
         `${supabaseUrl}/rest/v1/organization_memberships` +
-        `?organization_id=eq.${organizationId}&status=eq.active&select=role`;
+        `?organization_id=eq.${encodeURIComponent(organizationId)}&status=eq.active&select=role`;
 
       const response = await fetch(url, {
         headers: {

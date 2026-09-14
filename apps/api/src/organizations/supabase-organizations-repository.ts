@@ -69,9 +69,12 @@ export function createSupabaseOrganizationsRepository(
     },
 
     async getById(authToken, id: string) {
-      const response = await fetch(`${supabaseUrl}/rest/v1/organizations?id=eq.${id}&select=*`, {
-        headers: headers(authToken, { Accept: "application/vnd.pgrst.object+json" })
-      });
+      const response = await fetch(
+        `${supabaseUrl}/rest/v1/organizations?id=eq.${encodeURIComponent(id)}&select=*`,
+        {
+          headers: headers(authToken, { Accept: "application/vnd.pgrst.object+json" })
+        }
+      );
 
       if (response.status === 406 || response.status === 404) {
         return null;
@@ -83,25 +86,32 @@ export function createSupabaseOrganizationsRepository(
       return toOrganization((await response.json()) as OrganizationRow);
     },
 
+    // Calls the update_organization_settings() RPC rather than issuing a raw
+    // PostgREST PATCH against the table: direct UPDATE on organizations is
+    // revoked for authenticated (see
+    // 20260914150000_hardening_organization_authorization.sql) precisely so
+    // no client — including this adapter, if it ever regressed to a raw
+    // PATCH — can touch a column beyond display_name/legal_name.
+    // p_update_legal_name distinguishes "leave legal_name untouched"
+    // (legalName undefined in the patch) from "set it, possibly to null"
+    // (legalName present, including explicit null).
     async update(authToken, id: string, patch: UpdateOrganizationInput) {
-      const body: Record<string, unknown> = {};
-      if (patch.displayName !== undefined) body.display_name = patch.displayName;
-      if (patch.legalName !== undefined) body.legal_name = patch.legalName;
-
-      const response = await fetch(`${supabaseUrl}/rest/v1/organizations?id=eq.${id}`, {
-        method: "PATCH",
-        headers: headers(authToken, {
-          Prefer: "return=representation",
-          Accept: "application/vnd.pgrst.object+json"
-        }),
-        body: JSON.stringify(body)
+      const response = await fetch(`${supabaseUrl}/rest/v1/rpc/update_organization_settings`, {
+        method: "POST",
+        headers: headers(authToken, { Accept: "application/vnd.pgrst.object+json" }),
+        body: JSON.stringify({
+          p_organization_id: id,
+          p_display_name: patch.displayName ?? null,
+          p_legal_name: patch.legalName ?? null,
+          p_update_legal_name: patch.legalName !== undefined
+        })
       });
 
       if (response.status === 406 || response.status === 404) {
         return null;
       }
       if (!response.ok) {
-        throw new Error(`update organization failed with status ${response.status}`);
+        throw new Error(`update_organization_settings failed with status ${response.status}`);
       }
 
       return toOrganization((await response.json()) as OrganizationRow);
