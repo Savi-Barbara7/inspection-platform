@@ -27,7 +27,13 @@ const ALL_CAPABILITIES: Capability[] = [
   "report.supersede",
   "signature.request",
   "billing.manage",
-  "audit.read"
+  "audit.read",
+  "customer.read",
+  "customer.manage",
+  "site.read",
+  "site.manage",
+  "asset.read",
+  "asset.manage"
 ];
 
 describe("authorize()", () => {
@@ -54,8 +60,16 @@ describe("authorize()", () => {
   });
 
   it("viewer only reads, never mutates", () => {
-    expect(authorize({ role: "viewer" }, "technical_model.read")).toBe(true);
-    for (const capability of ALL_CAPABILITIES.filter((c) => c !== "technical_model.read")) {
+    const viewerReads: Capability[] = [
+      "technical_model.read",
+      "customer.read",
+      "site.read",
+      "asset.read"
+    ];
+    for (const capability of viewerReads) {
+      expect(authorize({ role: "viewer" }, capability)).toBe(true);
+    }
+    for (const capability of ALL_CAPABILITIES.filter((c) => !viewerReads.includes(c))) {
       expect(authorize({ role: "viewer" }, capability)).toBe(false);
     }
   });
@@ -88,6 +102,25 @@ describe("authorize()", () => {
       for (const capability of capabilities) {
         const expected = role === "owner" || role === "admin" || role === "technical_responsible";
         expect(authorize({ role }, capability)).toBe(expected);
+      }
+    }
+  });
+
+  it("only owner/admin/coordinator can manage customers, sites, or assets", () => {
+    const manageCapabilities: Capability[] = ["customer.manage", "site.manage", "asset.manage"];
+    for (const role of ALL_ROLES) {
+      for (const capability of manageCapabilities) {
+        const expected = role === "owner" || role === "admin" || role === "coordinator";
+        expect(authorize({ role }, capability)).toBe(expected);
+      }
+    }
+  });
+
+  it("template_manager and billing_admin cannot even read customers, sites, or assets", () => {
+    const readCapabilities: Capability[] = ["customer.read", "site.read", "asset.read"];
+    for (const role of ["template_manager", "billing_admin"] as MembershipRole[]) {
+      for (const capability of readCapabilities) {
+        expect(authorize({ role }, capability)).toBe(false);
       }
     }
   });

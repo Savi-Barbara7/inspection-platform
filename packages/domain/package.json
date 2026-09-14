@@ -10,7 +10,9 @@
     "./identity": "./src/identity/index.ts",
     "./organizations": "./src/organizations/index.ts",
     "./authorization": "./src/authorization/index.ts",
-    "./audit": "./src/audit/index.ts"
+    "./audit": "./src/audit/index.ts",
+    "./customers": "./src/customers/index.ts",
+    "./sites-assets": "./src/sites-assets/index.ts"
   },
   "scripts": {
     "build": "tsc --noEmit",

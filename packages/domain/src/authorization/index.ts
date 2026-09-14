@@ -27,7 +27,13 @@ export type Capability =
   | "report.supersede"
   | "signature.request"
   | "billing.manage"
-  | "audit.read";
+  | "audit.read"
+  | "customer.read"
+  | "customer.manage"
+  | "site.read"
+  | "site.manage"
+  | "asset.read"
+  | "asset.manage";
 
 /**
  * Role -> capability matrix. This is the single source of truth for "what
@@ -56,7 +62,13 @@ export const ROLE_CAPABILITIES: Readonly<Record<MembershipRole, readonly Capabil
     "report.supersede",
     "signature.request",
     "billing.manage",
-    "audit.read"
+    "audit.read",
+    "customer.read",
+    "customer.manage",
+    "site.read",
+    "site.manage",
+    "asset.read",
+    "asset.manage"
   ],
   admin: [
     "organization.members.manage",
@@ -77,7 +89,13 @@ export const ROLE_CAPABILITIES: Readonly<Record<MembershipRole, readonly Capabil
     "report.issue",
     "report.supersede",
     "signature.request",
-    "audit.read"
+    "audit.read",
+    "customer.read",
+    "customer.manage",
+    "site.read",
+    "site.manage",
+    "asset.read",
+    "asset.manage"
   ],
   template_manager: [
     "technical_model.read",
@@ -93,20 +111,44 @@ export const ROLE_CAPABILITIES: Readonly<Record<MembershipRole, readonly Capabil
     "job.review",
     "evidence.upload",
     "evidence.organize",
-    "report.render"
+    "report.render",
+    "customer.read",
+    "customer.manage",
+    "site.read",
+    "site.manage",
+    "asset.read",
+    "asset.manage"
   ],
-  inspector: ["technical_model.read", "job.edit", "evidence.upload", "evidence.organize"],
-  reviewer: ["technical_model.read", "job.review", "report.render"],
+  inspector: [
+    "technical_model.read",
+    "job.edit",
+    "evidence.upload",
+    "evidence.organize",
+    "customer.read",
+    "site.read",
+    "asset.read"
+  ],
+  reviewer: [
+    "technical_model.read",
+    "job.review",
+    "report.render",
+    "customer.read",
+    "site.read",
+    "asset.read"
+  ],
   technical_responsible: [
     "technical_model.read",
     "job.approve",
     "report.render",
     "report.issue",
     "report.supersede",
-    "signature.request"
+    "signature.request",
+    "customer.read",
+    "site.read",
+    "asset.read"
   ],
   billing_admin: ["billing.manage"],
-  viewer: ["technical_model.read"]
+  viewer: ["technical_model.read", "customer.read", "site.read", "asset.read"]
 } as const;
 
 export interface ActiveMembership {

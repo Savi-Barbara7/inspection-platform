@@ -1,13 +1,25 @@
 // Append-only business audit trail. See docs/domain/AUDIT.md and ADR-0012.
 //
-// This is the reusable core for Task 06 — only wired up for two real
-// actions so far (organization.created/updated). Add a new AuditAction /
-// AuditEntityType value only when a real call site emits it in the same
-// change; do not pre-populate this file with every future category.
+// This is the reusable core, extended one task at a time as real call
+// sites need it (Task 06: organization.*; Task 07: customer.*/site.*/
+// asset.*). Add a new AuditAction/AuditEntityType value only when a real
+// call site emits it in the same change; do not pre-populate this file
+// with every future category.
 
-export type AuditAction = "organization.created" | "organization.updated";
+export type AuditAction =
+  | "organization.created"
+  | "organization.updated"
+  | "customer.created"
+  | "customer.updated"
+  | "customer.archived"
+  | "site.created"
+  | "site.updated"
+  | "site.archived"
+  | "asset.created"
+  | "asset.updated"
+  | "asset.archived";
 
-export type AuditEntityType = "organization";
+export type AuditEntityType = "organization" | "customer" | "site" | "asset";
 
 export interface AuditEvent {
   id: string;
