@@ -69,6 +69,15 @@ Nunca decidir autorização por nome de role fora desse registro.
 | asset.read                   |   ✓   |   ✓   |                  |      ✓      |     ✓     |    ✓     |           ✓           |               |   ✓    |
 | asset.manage                 |   ✓   |   ✓   |                  |      ✓      |           |          |                       |               |        |
 
+Nota (Task 08): `technical_model.read` existe desde a Task 05 e continua
+governando o futuro fluxo de derivação de `OrganizationModel`, mas **não**
+é o que protege `GET /api/v1/technical-models` — esse catálogo é
+plataforma-wide, sem `organization_id`, então não faz sentido checar
+capability por organização ali. As rotas do catálogo usam só
+`requireAuth`; RLS (modelos `active`, versões `published`/`superseded`,
+`anon` sem grant algum) é quem de fato restringe o acesso — ver
+`docs/domain/TEMPLATES.md`.
+
 Racional: `owner`/`admin` cobrem operação completa (billing fica só com
 `owner` + `billing_admin`, nunca `admin`, para separar "roda a operação" de
 "mexe em pagamento"). `organization.settings.manage` é a capability que

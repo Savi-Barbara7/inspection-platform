@@ -4,6 +4,22 @@
 > (14 PDFs de referência estrutural + especificação técnica), recebido após a
 > Task 04. Substitui a priorização anterior de `CATALOG_V1.md` como escopo do
 > MVP — ver nota no topo daquele arquivo.
+>
+> **Implementado na Task 08** (`technical_models`/`technical_model_versions`,
+> ver `supabase/migrations/20260914210000_technical_model_catalog.sql` e
+> `20260914220000_seed_technical_model_catalog_phase1.sql`). Os 14 slugs
+> estáveis usados no seed: `neighborhood-preconstruction-survey`,
+> `building-inspection`, `pathology-report`, `structural-report`,
+> `facade-inspection`, `construction-handover`, `construction-punch-list`,
+> `new-apartment-handover`, `rental-entry-inspection`,
+> `rental-exit-comparison`, `urban-property-valuation`,
+> `building-damage-report`, `waterproofing-infiltration-report`,
+> `electrical-installation-inspection` (mesma ordem da tabela abaixo).
+> Categorias mapeadas: `building_engineering` (#1, #2, #5, #6, #7),
+> `specialized_engineering` (#3, #4, #12, #13), `property_inspection`
+> (#8, #9, #10), `real_estate` (#11), `electrical` (#14). Todos com
+> `researchStatus: DRAFT`, editorialmente `published` (ver
+> docs/domain/TEMPLATES.md "Research status × editorial status").
 
 ## Princípio do produto
 
@@ -19,22 +35,22 @@ o design visual final — esse é o papel do `PDF_OUTPUT_DESIGN_SPEC.md`.
 
 ## Os 14 modelos
 
-| # | Código | Modelo | Foco | Blocos-chave |
-|---|---|---|---|---|
-| 1 | TPL-01 | Vistoria Cautelar de Vizinhança | Estado prévio de imóveis e áreas na influência da obra | Cover, TOC, TechnicalInformation, Text, PhotoSection, Findings, DocumentAttachment, SignatureSection |
-| 2 | TPL-02 | Inspeção Predial | Avaliação sistêmica da edificação, manutenção e prioridades | Cover, TOC, TechnicalInformation, Table, PhotoSection, Findings, Text, SignatureSection |
-| 3 | TPL-03 | Laudo de Manifestações Patológicas | Investigação técnica de manifestações, mecanismos e recomendações | Cover, TOC, Text, TechnicalInformation, Findings, Table, PhotoSection, DocumentAttachment, SignatureSection |
-| 4 | TPL-04 | Laudo Estrutural | Inspeção, ensaios, análise e parecer sobre segurança/desempenho estrutural | Cover, TOC, TechnicalInformation, Findings, Table, PhotoSection, ImportedTable, DocumentAttachment, Text, SignatureSection |
-| 5 | TPL-05 | Vistoria de Fachadas | Inspeção especializada de revestimentos, elementos externos e risco de desprendimento | Cover, TOC, TechnicalInformation, Findings, Table, PhotoSection, DocumentAttachment, Text, SignatureSection |
-| 6 | TPL-06 | Vistoria de Entrega de Obra | Verificação técnica do produto entregue, sistemas, acabamentos e documentação | Cover, TOC, TechnicalInformation, Table, Findings, PhotoSection, DocumentAttachment, SignatureSection |
-| 7 | TPL-07 | Recebimento de Obra / Punch List | Pendências, reinspeção e aceite provisório/definitivo | Cover, TOC, TechnicalInformation, Table, Findings, PhotoSection, DocumentAttachment, SignatureSection |
-| 8 | TPL-08 | Vistoria de Apartamento Novo / Assistência na Entrega | Conferência técnica da unidade antes do recebimento das chaves | Cover, TOC, TechnicalInformation, Table, Findings, PhotoSection, SignatureSection |
-| 9 | TPL-09 | Vistoria Imobiliária de Entrada | Estado do imóvel no início da locação, ambiente por ambiente | Cover, TOC, TechnicalInformation, Table, PhotoSection, Text, SignatureSection |
-| 10 | TPL-10 | Vistoria Imobiliária de Saída e Comparativo | Comparação rastreável entre o baseline de entrada e a devolução | Cover, TOC, TechnicalInformation, Table, PhotoSection, Text, SignatureSection |
-| 11 | TPL-11 | Avaliação de Imóvel Urbano | Pesquisa, metodologia, memória de cálculo e valor de referência | Cover, TOC, TechnicalInformation, ImportedTable, Table, PhotoSection, Text, DocumentAttachment, SignatureSection |
-| 12 | TPL-12 | Laudo de Sinistro / Danos em Edificação | Caracterização do evento, extensão dos danos, segurança e recomendações | Cover, TOC, TechnicalInformation, Findings, Table, PhotoSection, DocumentAttachment, Text, SignatureSection |
-| 13 | TPL-13 | Laudo de Infiltrações e Impermeabilização | Mapeamento da umidade, investigação de origem e recomendações de correção | Cover, TOC, TechnicalInformation, Findings, Table, PhotoSection, DocumentAttachment, Text, SignatureSection |
-| 14 | TPL-14 | Inspeção de Instalações Elétricas | Condição de segurança, documentação, quadros, circuitos e medições | Cover, TOC, TechnicalInformation, Table, ImportedTable, Findings, PhotoSection, DocumentAttachment, Text, SignatureSection |
+| #   | Código | Modelo                                                | Foco                                                                                  | Blocos-chave                                                                                                               |
+| --- | ------ | ----------------------------------------------------- | ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| 1   | TPL-01 | Vistoria Cautelar de Vizinhança                       | Estado prévio de imóveis e áreas na influência da obra                                | Cover, TOC, TechnicalInformation, Text, PhotoSection, Findings, DocumentAttachment, SignatureSection                       |
+| 2   | TPL-02 | Inspeção Predial                                      | Avaliação sistêmica da edificação, manutenção e prioridades                           | Cover, TOC, TechnicalInformation, Table, PhotoSection, Findings, Text, SignatureSection                                    |
+| 3   | TPL-03 | Laudo de Manifestações Patológicas                    | Investigação técnica de manifestações, mecanismos e recomendações                     | Cover, TOC, Text, TechnicalInformation, Findings, Table, PhotoSection, DocumentAttachment, SignatureSection                |
+| 4   | TPL-04 | Laudo Estrutural                                      | Inspeção, ensaios, análise e parecer sobre segurança/desempenho estrutural            | Cover, TOC, TechnicalInformation, Findings, Table, PhotoSection, ImportedTable, DocumentAttachment, Text, SignatureSection |
+| 5   | TPL-05 | Vistoria de Fachadas                                  | Inspeção especializada de revestimentos, elementos externos e risco de desprendimento | Cover, TOC, TechnicalInformation, Findings, Table, PhotoSection, DocumentAttachment, Text, SignatureSection                |
+| 6   | TPL-06 | Vistoria de Entrega de Obra                           | Verificação técnica do produto entregue, sistemas, acabamentos e documentação         | Cover, TOC, TechnicalInformation, Table, Findings, PhotoSection, DocumentAttachment, SignatureSection                      |
+| 7   | TPL-07 | Recebimento de Obra / Punch List                      | Pendências, reinspeção e aceite provisório/definitivo                                 | Cover, TOC, TechnicalInformation, Table, Findings, PhotoSection, DocumentAttachment, SignatureSection                      |
+| 8   | TPL-08 | Vistoria de Apartamento Novo / Assistência na Entrega | Conferência técnica da unidade antes do recebimento das chaves                        | Cover, TOC, TechnicalInformation, Table, Findings, PhotoSection, SignatureSection                                          |
+| 9   | TPL-09 | Vistoria Imobiliária de Entrada                       | Estado do imóvel no início da locação, ambiente por ambiente                          | Cover, TOC, TechnicalInformation, Table, PhotoSection, Text, SignatureSection                                              |
+| 10  | TPL-10 | Vistoria Imobiliária de Saída e Comparativo           | Comparação rastreável entre o baseline de entrada e a devolução                       | Cover, TOC, TechnicalInformation, Table, PhotoSection, Text, SignatureSection                                              |
+| 11  | TPL-11 | Avaliação de Imóvel Urbano                            | Pesquisa, metodologia, memória de cálculo e valor de referência                       | Cover, TOC, TechnicalInformation, ImportedTable, Table, PhotoSection, Text, DocumentAttachment, SignatureSection           |
+| 12  | TPL-12 | Laudo de Sinistro / Danos em Edificação               | Caracterização do evento, extensão dos danos, segurança e recomendações               | Cover, TOC, TechnicalInformation, Findings, Table, PhotoSection, DocumentAttachment, Text, SignatureSection                |
+| 13  | TPL-13 | Laudo de Infiltrações e Impermeabilização             | Mapeamento da umidade, investigação de origem e recomendações de correção             | Cover, TOC, TechnicalInformation, Findings, Table, PhotoSection, DocumentAttachment, Text, SignatureSection                |
+| 14  | TPL-14 | Inspeção de Instalações Elétricas                     | Condição de segurança, documentação, quadros, circuitos e medições                    | Cover, TOC, TechnicalInformation, Table, ImportedTable, Findings, PhotoSection, DocumentAttachment, Text, SignatureSection |
 
 Todos os 14 usam exclusivamente o controlled block DSL já definido em
 `docs/domain/TEMPLATES.md` — nenhum bloco específico de vertical

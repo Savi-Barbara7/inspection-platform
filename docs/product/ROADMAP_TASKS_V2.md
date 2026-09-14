@@ -58,11 +58,13 @@ Entregue: `customers`/`sites`/`assets` (sem `contacts` -- fora de escopo, `email
 
 Gate: mesma estrutura suporta múltiplas verticais.
 
-## Task 08 — Technical Model Catalog
+## Task 08 — Technical Model Catalog ✅ concluída
 
 Entregar: `technical_models`, `technical_model_versions`, categorias, status, references, professional scope, fixtures. Fixtures iniciais devem cobrir alguns dos 14 modelos de `docs/product/technical-models/PHASE1_CATALOG.md` (não os 20+ de `CATALOG_V1.md`).
 
 Gate: versão publicada imutável.
+
+Entregue: os 14 modelos completos (não "alguns"), seed idempotente, `research_status` separado do `status` editorial (todos `DRAFT`/`published`, nenhum overclaim de `VERIFIED_REFERENCE_MODEL`), grants sem write path tenant-facing (`anon` sem grant, `authenticated` só `SELECT` via RLS), API read-only (`GET /technical-models`, `/:idOrSlug`, `/:idOrSlug/versions`, `/:idOrSlug/versions/:versionNumber`) sem depender de organização. Ver `docs/domain/TEMPLATES.md`.
 
 ## Task 09 — Controlled Document Block Engine
 

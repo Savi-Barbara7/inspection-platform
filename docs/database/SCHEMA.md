@@ -71,36 +71,49 @@ No `contacts` table yet -- out of scope for Task 07; `email`/`phone` on customer
 
 ## Templates
 
-### inspection_templates
+> O par `inspection_templates`/`report_templates` (duas entidades genéricas,
+> schema de coleta separado de layout) foi **substituído** pela hierarquia de
+> três níveis do ADR-0017 antes de qualquer código ser escrito — nunca
+> chegou a existir como tabela. Ver `docs/domain/TEMPLATES.md`.
+
+### technical_models (Task 08 — implementado, platform-owned, sem organization_id)
 
 - id uuid pk
-- organization_id uuid fk
+- slug text unique
 - name text
-- description text null
-- category text null
-- status text
-- created_by uuid
-- timestamps
+- short_name text null
+- category text (`building_engineering` | `specialized_engineering` | `property_inspection` | `real_estate` | `electrical`)
+- description text
+- objective text null
+- when_to_use text null
+- typical_object_type text null
+- usage_profile jsonb (`{usesPhotos, usesTables, usesAttachments, supportsComparative, involvesTechnicalResponsibility}`)
+- tags text[]
+- jurisdiction_scope text (free text: "BR", "BR/RS", "municipal", ...)
+- status text (`active` | `retired` -- whether the model is offered at all, independent of any version)
+- current_published_version_id uuid null, fk -> technical_model_versions (added via ALTER TABLE, tables reference each other)
+- created_at, updated_at timestamptz
 
-### inspection_template_versions
+### technical_model_versions (Task 08 — implemented)
 
 - id uuid pk
-- organization_id uuid fk
-- template_id uuid fk
-- version integer
-- status text
-- data_schema_json jsonb
-- ui_schema_json jsonb
-- rules_json jsonb
-- defaults_json jsonb
-- created_by uuid
-- published_by uuid null
-- published_at timestamptz null
-- unique(template_id, version)
+- technical_model_id uuid fk -> technical_models
+- version_number integer
+- status text (`draft` | `published` | `superseded` | `archived` -- editorial lifecycle)
+- research_status text (`RESEARCH_ONLY` | `DRAFT` | `INTERNAL_REVIEW` | `PROFESSIONAL_REVIEW` | `VERIFIED_REFERENCE_MODEL` -- independent of `status`, see docs/domain/TEMPLATES.md)
+- title text
+- description text null
+- technical_basis jsonb (array of `{type, title, identifier, edition, sourceUrl, accessNotes, verifiedAt}` -- metadata only, never full standard text)
+- jurisdiction_scope text null (version-level override of the model's own)
+- professional_scope jsonb (`{preparedBy, reviewedBy, signedBy, restrictions}`)
+- created_at, published_at, superseded_at timestamptz
+- unique(technical_model_id, version_number)
 
-### report_templates / report_template_versions
+No client-facing write path at all: `authenticated` has `SELECT` only (RLS: `active` models, `published`/`superseded` versions), `anon` has no grant. Write is migration/seed-only -- see `docs/domain/TEMPLATES.md` "Quem escreve".
 
-Mesma estratégia de identidade + versões imutáveis.
+### organization_models / organization_model_versions
+
+Ainda não implementado (Task 10+) -- derivação customizada de uma organização a partir de um `technical_model_versions` publicado. Mesma estratégia de identidade + versões imutáveis; `organization_id` obrigatório (tenant-owned, ao contrário de `technical_models`).
 
 ## Inspections
 
