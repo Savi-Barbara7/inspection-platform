@@ -66,13 +66,15 @@ Gate: versão publicada imutável.
 
 Entregue: os 14 modelos completos (não "alguns"), seed idempotente, `research_status` separado do `status` editorial (todos `DRAFT`/`published`, nenhum overclaim de `VERIFIED_REFERENCE_MODEL`), grants sem write path tenant-facing (`anon` sem grant, `authenticated` só `SELECT` via RLS), API read-only (`GET /technical-models`, `/:idOrSlug`, `/:idOrSlug/versions`, `/:idOrSlug/versions/:versionNumber`) sem depender de organização. Ver `docs/domain/TEMPLATES.md`.
 
-## Task 09 — Controlled Document Block Engine
+## Task 09 — Controlled Document Block Engine ✅ concluída
 
 Blocos: Cover, TOC, Text, TechnicalInformation, Table, ImportedTable, PhotoSection, DocumentAttachment, Findings, SignatureSection, Header, Footer, PageBreak.
 
 Entregar: schema versionado, validator, stable IDs, ordering, nested sections controladas, stable serialization, testes.
 
 Gate: sem código arbitrário; schemas inválidos rejeitados deterministicamente.
+
+Entregue: `packages/domain/src/templates/blocks.ts` — engine 100% genérico (nenhuma lógica de modelo específico), 13 tipos de bloco como Zod discriminated union `.strict()` (campo desconhecido é rejeitado, não ignorado), `validateDocumentDefinition()` (forma + unicidade de id em toda a árvore + profundidade máxima), `generateSectionId()`/`generateBlockId()` (IDs estáveis), `reorder()` (sem mutação, IDs nunca mudam), `canonicalize()`/`serializeDefinitionCanonical()` (serialização estável). Sem tabela nova/persistência — isso é Task 10. 21 testes, incluindo uma estrutura realista de um dos 14 modelos da Fase 1. Ver `docs/domain/TEMPLATES.md`.
 
 ## Task 10 — Organization Model Customization
 

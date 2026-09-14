@@ -97,13 +97,31 @@ Snapshot publicado e imutável de um `OrganizationModel`: textos, branding, seç
 
 ## Controlled Block DSL
 
-Uma seção é um container ordenado de blocos; pode conter mais de um tipo:
+> **Implementação (Task 09):** `packages/domain/src/templates/blocks.ts` —
+> engine genérico puro (sem I/O, sem lógica de nenhum modelo específico).
+> Usado por qualquer `TechnicalModelVersion`/`OrganizationModelVersion`
+> futura; não persiste nada sozinho — quem grava a definição (Task 10+)
+> chama `validateDocumentDefinition()` antes.
+
+Uma seção é um container ordenado de blocos; pode conter mais de um tipo, e pode aninhar subseções (até `MAX_SECTION_DEPTH = 3` níveis — aninhamento controlado, não recursão arbitrária):
 
 `Cover`, `TableOfContents`, `Text`, `TechnicalInformation`, `Table`, `ImportedTable`, `PhotoSection`, `DocumentAttachment`, `Findings`, `SignatureSection`, `Header`, `Footer`, `PageBreak`.
 
-Extensões futuras (Measurement, Calculation, Map, Chart) só entram por necessidade comprovada — nunca HTML/JS livre do tenant.
+Extensões futuras (Measurement, Calculation, Map, Chart) só entram por necessidade comprovada — nunca HTML/JS livre do tenant. Cada schema de bloco é `.strict()` (Zod): um campo desconhecido/extra (ex.: uma tentativa de `html`/`script`) é rejeitado deterministicamente, não ignorado silenciosamente — essa é a garantia real de "nenhum bloco executa código arbitrário do tenant", não só uma convenção.
 
-Cada bloco carrega dado e apresentação juntos: não existe um schema de coleta separado de um schema de layout (essa era a separação do modelo antigo, revertida na ADR-0017).
+Cada bloco carrega dado e apresentação juntos: não existe um schema de coleta separado de um schema de layout (essa era a separação do modelo antigo, revertida na ADR-0017). Note que cada bloco só carrega seu **contrato de configuração/exibição** — dados de runtime que pertencem a outros domínios ainda não construídos (arquivos de evidência, constatações, assinaturas) não vivem aqui; `PhotoSection`/`Findings`/`SignatureSection` etc. declaram "existe uma seção deste tipo, configurada assim", e os registros reais vêm das Tasks 15/22/28 quando existirem.
+
+### API do engine
+
+- `validateDocumentDefinition(input: unknown)` — ponto de entrada único; valida forma (Zod `.strict()`), unicidade de `id` em toda a árvore (mesmo entre seção e bloco não relacionados) e profundidade máxima de aninhamento. Determinístico: a mesma entrada sempre produz o mesmo resultado, nunca aceita parcialmente.
+- `generateSectionId()` / `generateBlockId()` — IDs estáveis (`sec-<uuid>`/`blk-<uuid>`), independentes de label/posição — sobrevivem a reordenação e renomeação.
+- `reorder(items, id, newIndex, getId)` — reordena sem mutar o array de entrada e sem alterar nenhum ID; posição no array é a única fonte de verdade de ordem (sem campo `order` paralelo que possa dessincronizar).
+- `canonicalize()` / `serializeDefinitionCanonical()` — serialização estável: duas definições logicamente idênticas produzem sempre a mesma string, independente da ordem de inserção das chaves usada para construí-las (ordem de array é preservada, por ser semanticamente significativa).
+- `CURRENT_DEFINITION_SCHEMA_VERSION` — versão do próprio DSL; uma mudança quebradora futura nos blocos incrementa essa constante em vez de reinterpretar definições já armazenadas sob a versão antiga.
+
+### Fora de escopo da Task 09 (deliberado)
+
+Nenhuma tabela nova foi criada para persistir uma `DocumentDefinition` real — isso fica para quando `OrganizationModel`/publicação (Task 10+) precisar de um lugar concreto para gravá-la. Task 09 entrega o engine validado e testado (inclusive contra uma estrutura realista de um dos 14 modelos da Fase 1, nos testes), não a integração de persistência.
 
 ## Requirements
 

@@ -18,7 +18,7 @@ Locais e ativos inspecionáveis (Task 07). `packages/domain/src/sites-assets` (p
 
 ## Templates
 
-Technical Models, Technical Model Versions, Organization Models, Organization Model Versions, controlled block DSL, requirements e publicação. Ver `docs/domain/TEMPLATES.md` e ADR-0017. `packages/domain/src/templates` (port) + `apps/api/src/technical-models` (adapter Supabase) implementam só `TechnicalModel`/`TechnicalModelVersion` (Task 08) -- `OrganizationModel`/`OrganizationModelVersion` e o controlled block engine chegam nas Tasks 09-10+.
+Technical Models, Technical Model Versions, Organization Models, Organization Model Versions, controlled block DSL, requirements e publicação. Ver `docs/domain/TEMPLATES.md` e ADR-0017. `packages/domain/src/templates` (port) + `apps/api/src/technical-models` (adapter Supabase) implementam `TechnicalModel`/`TechnicalModelVersion` (Task 08) e o controlled block engine genérico (Task 09, `packages/domain/src/templates/blocks.ts` — sem I/O, sem persistência própria). `OrganizationModel`/`OrganizationModelVersion` chegam na Task 10+.
 
 ## Inspections
 
