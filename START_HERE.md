@@ -2,6 +2,11 @@
 
 Este projeto foi preparado para ser provisionado e desenvolvido por um agente de IA com acesso autenticado a **GitHub, Cloudflare, Supabase e navegador**.
 
+> **Status:** Tasks 00–04 concluídas. A partir da Task 03.5, o domínio foi
+> realinhado (Technical Model → Organization Model → Technical Job → Report)
+> — ver `docs/adr/ADR-0017-technical-model-domain.md`. A partir da Task 05,
+> siga `docs/product/ROADMAP_TASKS_V2.md`, não mais `docs/product/FIRST_12_TASKS.md`.
+
 ## O que a pessoa proprietária precisa fazer
 
 Em condições normais: **nada de configuração técnica manual**.
@@ -56,7 +61,9 @@ Enquanto a marca não estiver definida:
 
 ## Gate de início
 
-O agente não deve começar Template Engine antes de provar automaticamente:
+✅ Satisfeito na Task 04 (pgTAP + testes de API + prova end-to-end — ver `docs/infra/PROVISIONING_STATE.md`).
+
+O agente não deve começar o Technical Model Engine (Task 08+) antes de provar automaticamente:
 
 - Organization A e B independentes;
 - User A e B autenticados;

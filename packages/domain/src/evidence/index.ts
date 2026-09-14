@@ -1,3 +1,4 @@
-// Uploads, storage metadata, hash, derivados e anotacao. Ver docs/domain/EVIDENCE.md.
-// Boundary intentionally empty until the corresponding task in FIRST_12_TASKS.md is executed.
+// Uploads, storage metadata, hash, derivados, anotacao e ordenacao/batch (sempre
+// humano, nunca IA no core - ADR-0017). Ver docs/domain/EVIDENCE.md.
+// Boundary intentionally empty until Task 15 (docs/product/ROADMAP_TASKS_V2.md).
 export {};

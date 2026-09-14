@@ -1,3 +1,4 @@
-// Templates de inspecao, versoes, schemas, regras e publicacao. Ver docs/domain/TEMPLATES.md.
-// Boundary intentionally empty until the corresponding task in FIRST_12_TASKS.md is executed.
+// TechnicalModel/TechnicalModelVersion/OrganizationModel/OrganizationModelVersion,
+// controlled block DSL, requirements e publicacao. Ver docs/domain/TEMPLATES.md.
+// Boundary intentionally empty until Task 08 (docs/product/ROADMAP_TASKS_V2.md).
 export {};

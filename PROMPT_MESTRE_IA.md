@@ -112,19 +112,15 @@ Depois implemente apenas o escopo da tarefa.
 
 ## Ordem
 
-0. Autonomous Provisioning
-1. Repository Foundation
-2. Local Database & Migration Harness
-3. Authentication Boundary
-4. Organizations & Memberships/RLS
-5. Capability Authorization
-6. Audit Baseline
-7. Customers/Sites/Assets
-8. Template Drafts
-9. Template Publish/Immutability
-10. Three-Vertical Proof
-11. Inspection Lifecycle
-12. Evidence Upload
+0. Autonomous Provisioning ✅
+1. Repository Foundation ✅
+2. Local Database & Migration Harness ✅
+3. Authentication Boundary ✅
+3.5. Domain & Product Realignment (Technical Model/Organization Model/Technical Job) ✅
+4. Organizations & Memberships/RLS ✅
+
+A partir daqui, siga `docs/product/ROADMAP_TASKS_V2.md` (Task 05 em diante)
+em vez da lista original abaixo — ver `docs/adr/ADR-0017-technical-model-domain.md`.
 
 Não pule gates.
 

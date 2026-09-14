@@ -1,5 +1,11 @@
 # Roadmap v1
 
+> A partir da Task 03.5, o detalhamento tarefa-a-tarefa vive em
+> `docs/product/ROADMAP_TASKS_V2.md` (substitui `FIRST_12_TASKS.md` a partir
+> da Task 05). As fases abaixo continuam válidas em espírito; "Template" e
+> "Inspection" abaixo devem ser lidos como Technical Model/Organization
+> Model e Technical Job — ver `docs/adr/ADR-0017-technical-model-domain.md`.
+
 ## Phase 0 — Foundation
 Governança, repositório, ambientes, CI, docs, threat model, data map, schema/RLS base.
 
@@ -8,18 +14,18 @@ Auth, Organizations, Memberships, roles/capabilities, RLS, audit baseline, stagi
 
 **Gate:** cross-tenant suite 100% verde.
 
-## Phase 2 — Generic Template Engine
-Draft/publish/version, JSON Schema, UI schema, rules, preview.
+## Phase 2 — Technical Model & Organization Model Engine
+Technical Model Catalog, Controlled Document Block Engine, Organization Model customization (draft/publish/version, provenance, requirement levels, drag-and-drop), preview.
 
-**Gate:** templates imobiliário, elétrico e ambiental sem código específico no core.
+**Gate:** modelos de segmentos distintos (SST, civil, elétrico) sem código específico no core.
 
-## Phase 3 — Inspection Engine
-Create/assign/execute/autosave/evidence/findings/submit/review/approve.
+## Phase 3 — Technical Job Engine
+Create/assign/execute/autosave/evidence/findings/submit/review/approve, evidence ordering & batch operations (sem IA no core).
 
 ## Phase 4 — Report Engine
-Report templates, render plan, Chromium worker, snapshots, hashes, issue/supersede.
+Renderer v1, Chromium worker, snapshots, hashes, signature abstraction, issue/supersede.
 
-**Gate:** alterar template não altera documento histórico.
+**Gate:** alterar Organization Model não altera documento histórico já emitido.
 
 ## Phase 5 — Field PWA Offline
 IndexedDB, downloads de assigned inspections, outbox, media queue, conflict handling.

@@ -9,9 +9,11 @@
 | Auth | Supabase Auth |
 | Autorização | capabilities + RLS |
 | API | REST `/api/v1` + OpenAPI 3.1 |
-| Templates | JSON Schema + UI Schema + declarative rules |
-| Published templates | imutáveis |
-| Inspection answers | JSONB + entidades normalizadas |
+| Documentos | Technical Model → Organization Model → Technical Job → Report (ADR-0017) |
+| Blocos | Controlled block DSL (dado + apresentação juntos), sem código arbitrário |
+| Published model/org versions | imutáveis |
+| Technical Job answers | JSONB + entidades normalizadas |
+| Evidence ordering | sempre humano/determinístico; IA nunca move/apaga/renomeia no core |
 | Concurrency | revision + optimistic concurrency |
 | Evidence | entidade genérica + original preservado + SHA-256 |
 | Storage | private object storage behind StorageProvider |

@@ -1,5 +1,9 @@
 # Primeiras 13 tarefas para a IA — começando pela Task 00
 
+> **Tasks 00–04 abaixo: concluídas e válidas.** A partir da Task 05, este
+> arquivo está substituído por `docs/product/ROADMAP_TASKS_V2.md` (revisão
+> de domínio na Task 03.5 — ver `docs/adr/ADR-0017-technical-model-domain.md`).
+> Não use as Tasks 05–12 abaixo; elas ficam só como registro histórico.
 
 Cada tarefa deve virar um PR separado ou um conjunto pequeno e coerente de PRs. Não executar tudo em uma única solicitação.
 

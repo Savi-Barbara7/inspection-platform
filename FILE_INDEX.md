@@ -32,6 +32,7 @@
 - `docs/adr/ADR-0013-billing.md`
 - `docs/adr/ADR-0014-api.md`
 - `docs/adr/ADR-0015-infrastructure-regions.md`
+- `docs/adr/ADR-0017-technical-model-domain.md` — supersedes ADR-0006/ADR-0007
 - `docs/api/API_GUIDE.md`
 - `docs/architecture/CONTEXT.md`
 - `docs/architecture/DATA_FLOW.md`
@@ -49,9 +50,13 @@
 - `docs/privacy/LGPD.md`
 - `docs/privacy/RETENTION.md`
 - `docs/privacy/SUBPROCESSORS.md`
-- `docs/product/FIRST_12_TASKS.md`
+- `docs/product/FIRST_12_TASKS.md` — histórico; Task 05+ substituída por ROADMAP_TASKS_V2.md
 - `docs/product/GLOSSARY.md`
 - `docs/product/ROADMAP.md`
+- `docs/product/ROADMAP_TASKS_V2.md` — Task 03.5–37
+- `docs/product/technical-models/RESEARCH_PROTOCOL.md`
+- `docs/product/technical-models/CATALOG_V1.md`
+- `docs/product/technical-models/SCHEMAS_V1.md`
 - `docs/runbooks/BACKUP_RESTORE.md`
 - `docs/runbooks/DEPLOYMENT.md`
 - `docs/runbooks/INCIDENT_RESPONSE.md`

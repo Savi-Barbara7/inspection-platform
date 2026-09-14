@@ -1,7 +1,11 @@
 # ADR-0006 — Template architecture
 
-**Status:** Accepted for v1  
+**Status:** Superseded by ADR-0017 (2026-09-14)
 **Date:** 2026-09-11
+
+> Kept as historical record. The `InspectionTemplate`/`InspectionTemplateVersion`
+> split described below was replaced by the TechnicalModel → OrganizationModel
+> hierarchy in ADR-0017 before any code implemented this ADR.
 
 ## Context
 

@@ -1,8 +1,13 @@
 # Especificação Técnica v1 — Núcleo SaaS Multi-Tenant
 
+> **Realinhamento (Task 03.5):** §5, §7–9 e §13–14 foram atualizados para o
+> modelo Technical Model → Organization Model → Technical Job → Report.
+> Ver `docs/adr/ADR-0017-technical-model-domain.md` e
+> `docs/product/ROADMAP_TASKS_V2.md`.
+
 ## 1. Escopo
 
-Construir uma plataforma SaaS B2B multi-tenant para criação de templates de inspeção, execução de vistorias, coleta de evidências, constatações, revisão, aprovação, geração e emissão versionada de documentos técnicos.
+Construir uma plataforma SaaS B2B multi-tenant para produção de laudos e documentos técnicos a partir de modelos técnicos pré-estabelecidos (Technical Models), personalização por organização (Organization Models), execução de trabalhos técnicos (Technical Jobs), coleta de evidências, constatações, revisão, aprovação, geração e emissão versionada de documentos.
 
 O produto deve atender múltiplas verticais sem que cada nova vertical exija um sistema independente.
 
@@ -27,8 +32,8 @@ Ficam fora do MVP:
 
 1. **Multi-tenancy real:** `organization_id` + RLS + autorização em aplicação + testes cross-tenant.
 2. **Dados antes do PDF:** PDF é derivado de dados e snapshots estruturados.
-3. **Imutabilidade:** template publicado e relatório emitido não são sobrescritos.
-4. **Configuração segura:** templates usam schema/DSL; sem código arbitrário.
+3. **Imutabilidade:** Technical Model Version, Organization Model Version e relatório emitido não são sobrescritos.
+4. **Configuração segura:** modelos usam controlled block DSL; sem código arbitrário.
 5. **Modular monolith:** módulos bem definidos e workers assíncronos.
 6. **Provider abstraction:** domínio não depende de storage, billing ou auth provider.
 7. **Privacy/security by design:** decisões de dados e segurança entram no design.
@@ -97,12 +102,23 @@ Organization
 │   └── Contacts
 ├── Sites
 │   └── Assets
-├── Templates
-├── Inspections
+├── OrganizationModels (derivados de TechnicalModels da plataforma)
+├── TechnicalJobs
 └── Reports
 ```
 
 `Organization` é o tenant pagante. `Customer` é cliente do tenant.
+
+Modelo de documentos (ver `docs/domain/TEMPLATES.md`):
+
+```text
+TechnicalModel (plataforma)
+  -> TechnicalModelVersion (published, immutable)
+    -> OrganizationModel (tenant)
+      -> OrganizationModelVersion (published, immutable)
+        -> TechnicalJob
+          -> Report -> ReportVersion (issued, immutable)
+```
 
 ## 6. Roles iniciais
 
@@ -123,15 +139,22 @@ Autorização interna deve usar capabilities para não acoplar regras aos nomes 
 Exemplos:
 
 - `organization.members.manage`
-- `template.create`
-- `template.publish`
-- `inspection.create`
-- `inspection.assign`
-- `inspection.execute`
-- `inspection.review`
-- `inspection.approve`
+- `technical_model.read`
+- `organization_model.create`
+- `organization_model.customize`
+- `organization_model.publish`
+- `job.create`
+- `job.assign`
+- `job.edit`
+- `job.review`
+- `job.approve`
+- `evidence.upload`
+- `evidence.organize`
+- `evidence.delete`
 - `report.render`
 - `report.issue`
+- `report.supersede`
+- `signature.request`
 - `billing.manage`
 
 ## 8. Entidades de domínio
@@ -144,12 +167,12 @@ Exemplos:
 - Contact
 - Site
 - Asset
-- InspectionTemplate
-- InspectionTemplateVersion
-- ReportTemplate
-- ReportTemplateVersion
-- Inspection
-- InspectionAssignment
+- TechnicalModel
+- TechnicalModelVersion
+- OrganizationModel
+- OrganizationModelVersion
+- TechnicalJob
+- JobAssignment
 - Evidence
 - Finding
 - CorrectiveAction
@@ -165,15 +188,13 @@ Exemplos:
 - Entitlement
 - UsageRecord
 
-## 9. Template Engine
+## 9. Technical Model Engine
 
-Templates de inspeção possuem `data_schema_json`, `ui_schema_json`, `rules_json` e defaults. Templates publicados são imutáveis.
+Ver `docs/domain/TEMPLATES.md` para o detalhamento completo (hierarquia, controlled block DSL, requirement levels).
 
-IDs de campos são estáveis e não dependem de labels.
+Resumo: `TechnicalModelVersion`/`OrganizationModelVersion` publicados são imutáveis; uma nova edição sempre cria um novo draft/version. Section/block IDs são estáveis e não dependem de labels. Regras condicionais usam DSL declarativa controlada; fórmulas são limitadas a operadores/funções aprovados. É proibida execução arbitrária de JavaScript/SQL/HTML em qualquer bloco.
 
-Regras condicionais usam DSL declarativa controlada. Fórmulas são limitadas a operadores/funções aprovados. É proibida execução arbitrária de JavaScript/SQL.
-
-## 10. Inspection Engine
+## 10. Technical Job Engine
 
 Estados iniciais:
 
@@ -189,7 +210,7 @@ Outros estados: `cancelled`, `archived`.
 
 Transições são comandos de domínio, não simples UPDATE de status.
 
-Cada inspeção possui `revision` para optimistic concurrency.
+Cada `TechnicalJob` possui `revision` para optimistic concurrency.
 
 ## 11. Evidence
 
@@ -205,28 +226,31 @@ prepare → signed upload → quarantine → validate/scan → process → avail
 
 Original é preservado. Derivados podem incluir thumbnail/preview/annotated.
 
+Ordenação, seleção e operações em lote sobre evidências são sempre humanas, determinísticas e auditáveis — nenhuma IA move, apaga, renomeia ou classifica evidência automaticamente no core (ver `docs/domain/EVIDENCE.md`).
+
 ## 12. Findings
 
 Não conformidades/constatações são entidades separadas e podem futuramente gerar `CorrectiveAction`.
 
 ## 13. Report Engine
 
-Inspection Template define o que coletar. Report Template define como apresentar.
+A `OrganizationModelVersion` já define, por seção/bloco, tanto o que é coletado quanto como é apresentado — não existe mais um Report Template separado (ver ADR-0017).
 
-Renderer usa DSL de componentes controlados, por exemplo:
+Renderer usa o controlled block DSL (ver `docs/domain/TEMPLATES.md`):
 
 - Cover
-- Heading
+- TableOfContents
 - Text
-- FieldValue
+- TechnicalInformation
 - Table
-- EvidenceGrid
-- FindingList
-- SignatureBlock
+- ImportedTable
+- PhotoSection
+- DocumentAttachment
+- Findings
+- SignatureSection
 - Header
 - Footer
 - PageBreak
-- TOC
 
 ## 14. Emissão
 
@@ -234,7 +258,7 @@ Emitir relatório significa:
 
 1. validar permissão;
 2. validar estado e campos obrigatórios;
-3. congelar snapshot de inspeção/template/layout;
+3. congelar snapshot de technical job/organization model version/technical model version de origem;
 4. gerar asset manifest;
 5. criar job de render;
 6. gerar PDF em ambiente controlado;
@@ -259,7 +283,7 @@ Operações críticas devem avaliar idempotência: emissão, billing webhooks, s
 
 ## 17. Audit
 
-Audit trail é append-only e separado de logs técnicos. Eventos incluem publicação de template, mudanças de role, submissão/reabertura/aprovação, emissão/supersede de relatório, exclusão de evidência e exportações.
+Audit trail é append-only e separado de logs técnicos. Eventos incluem publicação de Organization Model Version, mudanças de role, submissão/reabertura/aprovação de Technical Job, emissão/supersede de relatório, reordenação/exclusão de evidência e exportações.
 
 ## 18. Billing
 
@@ -267,7 +291,7 @@ Domínio usa `BillingProvider`. Código de negócio consulta `Entitlement`, não
 
 ## 19. Offline
 
-PWA offline sincroniza somente o necessário para o usuário. Operações carregam `operation_id`, `device_id`, `inspection_id` e `base_revision`.
+PWA offline sincroniza somente o necessário para o usuário. Operações carregam `operation_id`, `device_id`, `job_id` e `base_revision`.
 
 Evidence é preferencialmente append-only. Comandos críticos permanecem server-authoritative.
 
@@ -284,10 +308,12 @@ O produto deve manter data map, classificação, retenção, suboperadores e pro
 ## 22. Milestones
 
 1. Secure Multi-Tenant Foundation
-2. Generic Template Engine
-3. Complete Inspection Lifecycle
+2. Technical Model & Organization Model Engine
+3. Complete Technical Job Lifecycle
 4. Reproducible Technical Document
 5. Field PWA Offline
 6. Billing
 7. API/Webhooks
 8. Enterprise
+
+Detalhamento tarefa-a-tarefa: `docs/product/ROADMAP_TASKS_V2.md`.

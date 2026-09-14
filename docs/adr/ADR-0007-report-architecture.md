@@ -1,7 +1,12 @@
 # ADR-0007 — Report architecture
 
-**Status:** Accepted for v1  
+**Status:** Superseded by ADR-0017 (2026-09-14)
 **Date:** 2026-09-11
+
+> Kept as historical record. The separate report-layout-vs-collection-schema
+> split described below was replaced by controlled blocks that carry both
+> data and presentation together, under OrganizationModelVersion, in ADR-0017.
+> `Report`/`ReportVersion` and the immutability guarantee remain accurate.
 
 ## Context
 
