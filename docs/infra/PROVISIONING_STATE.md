@@ -12,6 +12,15 @@
 - GitHub Actions CI (lint/typecheck/test/build): done, green on `main`
 - Date: 2026-09-11
 
+## Local (Task 02 — Database & Migration Harness)
+
+- `supabase/migrations` is the source of truth; first migration enables `pgcrypto` and a shared `set_updated_at()` trigger (no business tables yet)
+- `supabase/seed.sql`: fictitious-data-only policy documented, empty until Task 04
+- Root scripts: `db:start`, `db:stop`, `db:reset`, `db:diff`, `db:test`
+- CI `database` job: `supabase start` + `supabase db reset` on every push/PR, green
+- Local dev machine has no Docker Desktop; verified instead with Colima (documented gap — owner should install Docker Desktop or keep using Colima per `docs/SETUP_BEFORE_CODING.md`)
+- Date: 2026-09-14
+
 ## GitHub
 
 - Workspace: personal account `Savi-Barbara7` (no organization existed; none created per "não criar organização nova só por estética")
