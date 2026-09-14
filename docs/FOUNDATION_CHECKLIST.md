@@ -27,7 +27,7 @@ O agente é responsável por executar e marcar estes itens. A proprietária não
 
 - [x] staging criado em `sa-east-1`
 - [ ] production separado criado se o plano atual permitir sem compra — adiado deliberadamente até a fase de promoção (ver ADR/AUTONOMOUS_BOOTSTRAP.md)
-- [ ] Auth baseline configurado (Task 03)
+- [x] Auth baseline configurado (Task 03 — adapter de Supabase Auth, middleware `requireAuth`, sem regras de tenant)
 - [ ] Storage privado configurado (Task 12)
 - [x] migrations são source of truth (`supabase/migrations`, Task 02)
 - [x] RLS strategy documentada (`docs/database/RLS.md`; implementação começa na Task 04)

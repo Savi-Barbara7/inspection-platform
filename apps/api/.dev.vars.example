@@ -1,2 +1,6 @@
 # Somente nomes/valores fictícios. Nunca colocar secrets reais neste arquivo.
 APP_ENV=local
+# Aponte para a stack local do `supabase start` (Task 02). SUPABASE_URL e a
+# publishable/anon key são seguras para expor — nunca coloque a service_role aqui.
+SUPABASE_URL=http://127.0.0.1:54321
+SUPABASE_PUBLISHABLE_KEY=LOCAL_ANON_OR_PUBLISHABLE_KEY_FROM_SUPABASE_START

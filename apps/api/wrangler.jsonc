@@ -6,6 +6,12 @@
   "observability": {
     "enabled": true
   },
+  // SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY are safe to version: the
+  // publishable/anon key is meant to be public. service_role never goes here.
+  "vars": {
+    "SUPABASE_URL": "https://lxechulbjswneiqowant.supabase.co",
+    "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_N2_GbRyXvKmo7mCGmxn-JQ_Sy6fD33X"
+  },
   "env": {
     "production": {
       "name": "inspection-api-production"
