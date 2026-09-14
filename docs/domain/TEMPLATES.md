@@ -111,6 +111,8 @@ Extensões futuras (Measurement, Calculation, Map, Chart) só entram por necessi
 
 Cada bloco carrega dado e apresentação juntos: não existe um schema de coleta separado de um schema de layout (essa era a separação do modelo antigo, revertida na ADR-0017). Note que cada bloco só carrega seu **contrato de configuração/exibição** — dados de runtime que pertencem a outros domínios ainda não construídos (arquivos de evidência, constatações, assinaturas) não vivem aqui; `PhotoSection`/`Findings`/`SignatureSection` etc. declaram "existe uma seção deste tipo, configurada assim", e os registros reais vêm das Tasks 15/22/28 quando existirem.
 
+**Schema vs. dado real de trabalho:** essa mesma regra vale dentro de cada campo, não só entre blocos. `TechnicalInformationField.defaultValue` e `Table`/`ImportedTable.sampleRows` (nomeados assim deliberadamente, nunca `value`/`rows`) carregam apenas um valor padrão/ilustrativo — nunca a resposta real preenchida numa vistoria. O preenchimento real de um `TechnicalJob` (Task 13+) vive num registro de runtime separado que instancia esta estrutura; ele nunca é escrito de volta em `TechnicalModelVersion.definition` nem em `OrganizationModelVersion.definition`, que permanecem apenas definição.
+
 ### API do engine
 
 - `validateDocumentDefinition(input: unknown)` — ponto de entrada único; valida forma (Zod `.strict()`), unicidade de `id` em toda a árvore (mesmo entre seção e bloco não relacionados) e profundidade máxima de aninhamento. Determinístico: a mesma entrada sempre produz o mesmo resultado, nunca aceita parcialmente.
@@ -122,6 +124,30 @@ Cada bloco carrega dado e apresentação juntos: não existe um schema de coleta
 ### Fora de escopo da Task 09 (deliberado)
 
 Nenhuma tabela nova foi criada para persistir uma `DocumentDefinition` real — isso fica para quando `OrganizationModel`/publicação (Task 10+) precisar de um lugar concreto para gravá-la. Task 09 entrega o engine validado e testado (inclusive contra uma estrutura realista de um dos 14 modelos da Fase 1, nos testes), não a integração de persistência.
+
+## OrganizationModel / OrganizationModelVersion (Task 10)
+
+> **Implementação:** `packages/domain/src/organization-models` (port) +
+> `apps/api/src/organization-models` (rotas + adapter Supabase) +
+> `supabase/migrations/20260914240000_organization_models.sql`.
+
+Uma organização nunca começa de um modelo em branco: `OrganizationModel` é sempre derivado de uma `TechnicalModelVersion` **publicada** (`technical_models.status = 'active'` e com `current_published_version_id`), via a RPC `derive_organization_model(p_organization_id, p_technical_model_id, p_name)`. Ela cria, na mesma transação, o `OrganizationModel` e sua primeira `OrganizationModelVersion` (`status = 'draft'`, `version_number = 1`), copiando a `definition`/`definition_schema_version` da versão de origem **verbatim** — nunca em branco.
+
+`TechnicalModelVersion.definition` também passou a existir na Task 10 (coluna `definition jsonb`, populada para os 14 modelos da Fase 1 na mesma leva de migrations) justamente para que essa cópia inicial tivesse conteúdo real, e não um documento vazio.
+
+Invariantes:
+
+- um `OrganizationModel` pertence a exatamente uma organização; a organização A nunca vê nem altera o modelo derivado da organização B (RLS + FK composta tenant-safe: `organization_model_versions.organization_model_id` referencia `organization_models(id, organization_id)`, tornando uma referência cross-tenant estruturalmente impossível mesmo com um `organization_id` internamente consistente na própria linha);
+- a versão derivada mantém `technical_model_version_id` como proveniência — nunca perdida, mesmo depois de futuras edições do rascunho;
+- toda `definition` gravada passa por `validateDocumentDefinition()` (Task 09) antes de chegar ao Postgres — a API nunca redeclara os 13 schemas de bloco; um bloco desconhecido, um campo extra/desconhecido, ou um id duplicado é rejeitado deterministicamente com 422;
+- a organização nunca altera `TechnicalModel`/`TechnicalModelVersion` — nenhum role de tenant tem grant de escrita no catálogo global;
+- edição do rascunho (título/descrição/definição) é um PATCH estruturado único e validado (`PATCH /:id/draft`) — não uma dezena de endpoints de microedição por bloco.
+
+Capability nova: `organization_model.read` (concedida a todo role exceto `billing_admin`) é distinta de `technical_model.read` — ver `docs/security/AUTHORIZATION.md`. `organization_model.create`/`customize`/`publish` permanecem restritas a `owner`/`admin`/`template_manager` desde a Task 05.
+
+### Fora de escopo da Task 10 (deliberado)
+
+Requirement & Compatibility Guard (Task 11); publicação/imutabilidade de `OrganizationModelVersion` (Task 12); `TechnicalJob` e qualquer dado de execução real (Task 13+); editor visual/frontend; fotos; renderizador de PDF; branding; assinaturas.
 
 ## Requirements
 

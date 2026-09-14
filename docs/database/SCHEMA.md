@@ -108,12 +108,42 @@ No `contacts` table yet -- out of scope for Task 07; `email`/`phone` on customer
 - professional_scope jsonb (`{preparedBy, reviewedBy, signedBy, restrictions}`)
 - created_at, published_at, superseded_at timestamptz
 - unique(technical_model_id, version_number)
+- definition jsonb (Task 10: a `DocumentDefinition`, Controlled Block DSL — see `docs/domain/TEMPLATES.md`; never blank for a published version, so `OrganizationModel` derivation always starts from real structure)
+- definition_schema_version integer (mirrors `DocumentDefinition.schemaVersion`)
 
 No client-facing write path at all: `authenticated` has `SELECT` only (RLS: `active` models, `published`/`superseded` versions), `anon` has no grant. Write is migration/seed-only -- see `docs/domain/TEMPLATES.md` "Quem escreve".
 
-### organization_models / organization_model_versions
+### organization_models (Task 10 — implemented)
 
-Ainda não implementado (Task 10+) -- derivação customizada de uma organização a partir de um `technical_model_versions` publicado. Mesma estratégia de identidade + versões imutáveis; `organization_id` obrigatório (tenant-owned, ao contrário de `technical_models`).
+- id uuid pk
+- organization_id uuid fk -> organizations (tenant-owned, unlike `technical_models`)
+- technical_model_id uuid fk -> technical_models (the catalog entry this was derived from; the catalog itself is never altered)
+- name text
+- current_draft_version_id uuid null, fk -> organization_model_versions (added via ALTER TABLE)
+- archived_at timestamptz null (no hard delete)
+- created_at, updated_at timestamptz
+- unique(id, organization_id) (lets child tables use the tenant-safe composite FK pattern)
+
+RLS: `SELECT` via `is_org_member`; `INSERT`/`UPDATE` via `has_org_role(organization_id, array['owner','admin','template_manager'])`; `DELETE` revoked from `authenticated`/`anon` entirely.
+
+### organization_model_versions (Task 10 — implemented)
+
+- id uuid pk
+- organization_id uuid (denormalized from the parent model, for the composite FK and for RLS)
+- organization_model_id uuid, composite fk -> organization_models(id, organization_id) (structurally impossible to point at another organization's model, even with an internally-consistent `organization_id` on this row)
+- technical_model_version_id uuid fk -> technical_model_versions (provenance: which published version this was derived/rebased from — never lost)
+- version_number integer
+- status text (`draft` | `published` | `archived` — Task 10 only ever writes `draft`; `published`/`archived` exist for Task 12's publish/immutability gate)
+- title text
+- description text null
+- definition jsonb (a `DocumentDefinition`; copied verbatim from the source `technical_model_versions.definition` at derivation time — never starts blank)
+- definition_schema_version integer
+- created_at, updated_at, published_at, archived_at timestamptz
+- unique(organization_model_id, version_number)
+
+RLS: same shape as `organization_models` (`SELECT` via `is_org_member`, role-gated `INSERT`/`UPDATE`, `DELETE` revoked). Creation goes through `derive_organization_model(p_organization_id, p_technical_model_id, p_name)`, a `SECURITY DEFINER` RPC that atomically inserts both the `organization_models` row and its initial draft `organization_model_versions` row, re-checks `has_org_role` itself (SECURITY DEFINER bypasses RLS), and rejects (`P0002`) a `technical_models` row that is not `active` or has no `current_published_version_id`. `EXECUTE` is explicitly revoked from `anon`, granted to `authenticated` only, in the same migration that creates the function (see the Task 05.1 lesson in AGENTS.md about `pg_default_acl`).
+
+A structured PATCH on the draft (title/description/definition) goes through plain RLS-gated PostgREST — no dedicated RPC, since it is a single-row update with no cross-table atomicity concern. Any `definition` in that PATCH must already have passed `validateDocumentDefinition()` (Task 09) at the API layer before it reaches PostgREST; the 13 block schemas are never re-declared in `apps/api`.
 
 ## Inspections
 

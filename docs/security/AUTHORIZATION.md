@@ -45,6 +45,7 @@ Nunca decidir autorização por nome de role fora desse registro.
 | organization.members.manage  |   ✓   |   ✓   |                  |             |           |          |                       |               |        |
 | organization.settings.manage |   ✓   |   ✓   |                  |             |           |          |                       |               |        |
 | technical_model.read         |   ✓   |   ✓   |        ✓         |      ✓      |     ✓     |    ✓     |           ✓           |               |   ✓    |
+| organization_model.read      |   ✓   |   ✓   |        ✓         |      ✓      |     ✓     |    ✓     |           ✓           |               |   ✓    |
 | organization_model.create    |   ✓   |   ✓   |        ✓         |             |           |          |                       |               |        |
 | organization_model.customize |   ✓   |   ✓   |        ✓         |             |           |          |                       |               |        |
 | organization_model.publish   |   ✓   |   ✓   |        ✓         |             |           |          |                       |               |        |
@@ -77,6 +78,17 @@ capability por organização ali. As rotas do catálogo usam só
 `requireAuth`; RLS (modelos `active`, versões `published`/`superseded`,
 `anon` sem grant algum) é quem de fato restringe o acesso — ver
 `docs/domain/TEMPLATES.md`.
+
+Nota (Task 10): `organization_model.read` é uma capability nova e
+deliberadamente separada de `technical_model.read` — enxergar os modelos
+já customizados pela própria organização é uma preocupação distinta de
+enxergar o catálogo global, mesmo quando os dois roles coincidem hoje.
+Concedida a todo role exceto `billing_admin` (inclusive `viewer`); já
+`organization_model.create`/`customize`/`publish` permanecem restritas a
+`owner`/`admin`/`template_manager`, sem mudança desde a Task 05. Nenhum
+role de tenant tem (nem nunca terá, sem uma decisão explícita) capacidade
+de escrita sobre `technical_models`/`technical_model_versions` — o
+catálogo global é somente leitura para todos eles.
 
 Racional: `owner`/`admin` cobrem operação completa (billing fica só com
 `owner` + `billing_admin`, nunca `admin`, para separar "roda a operação" de
