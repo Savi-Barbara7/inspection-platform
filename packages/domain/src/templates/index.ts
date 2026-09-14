@@ -11,6 +11,8 @@
 //     that's honest, not a contradiction (see docs/domain/TEMPLATES.md
 //     "Research status vs editorial status").
 
+export * from "./blocks";
+
 export type TechnicalModelCategory =
   | "building_engineering"
   | "specialized_engineering"

@@ -1,7 +1,12 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "noEmit": true
+    "noEmit": true,
+    // "DOM" only for the ambient `crypto.randomUUID()` type (a standard
+    // Web Crypto API present in Node 19+, Cloudflare Workers, and every
+    // browser this monorepo targets) -- purely a type-checking convenience,
+    // adds no actual browser dependency to this package's runtime code.
+    "lib": ["ES2022", "DOM"]
   },
   "include": ["src"]
 }
