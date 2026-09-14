@@ -6,6 +6,9 @@ Este projeto foi preparado para ser provisionado e desenvolvido por um agente de
 > realinhado (Technical Model → Organization Model → Technical Job → Report)
 > — ver `docs/adr/ADR-0017-technical-model-domain.md`. A partir da Task 05,
 > siga `docs/product/ROADMAP_TASKS_V2.md`, não mais `docs/product/FIRST_12_TASKS.md`.
+> Catálogo oficial da Fase 1: 14 modelos, ver
+> `docs/product/technical-models/PHASE1_CATALOG.md`. Contrato visual do PDF:
+> `docs/product/PDF_OUTPUT_DESIGN_SPEC.md`.
 
 ## O que a pessoa proprietária precisa fazer
 

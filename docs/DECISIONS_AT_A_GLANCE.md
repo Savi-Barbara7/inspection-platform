@@ -14,6 +14,8 @@
 | Published model/org versions | imutáveis |
 | Technical Job answers | JSONB + entidades normalizadas |
 | Evidence ordering | sempre humano/determinístico; IA nunca move/apaga/renomeia no core |
+| Catálogo Fase 1 | 14 modelos (PHASE1_CATALOG.md); SST/industrial vira future_catalog |
+| PDF | produto editorial independente da UI (PDF_OUTPUT_DESIGN_SPEC.md), nunca captura de tela |
 | Concurrency | revision + optimistic concurrency |
 | Evidence | entidade genérica + original preservado + SHA-256 |
 | Storage | private object storage behind StorageProvider |

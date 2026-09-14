@@ -1,6 +1,9 @@
 # Reports Domain
 
 > Realinhado na Task 03.5 — ver `docs/adr/ADR-0017-technical-model-domain.md`.
+> Contrato visual do PDF emitido: `docs/product/PDF_OUTPUT_DESIGN_SPEC.md`.
+> O PDF é um produto editorial independente da UI do SaaS — nunca uma
+> captura da interface.
 
 ## Separação
 

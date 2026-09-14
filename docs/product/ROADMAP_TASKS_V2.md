@@ -5,6 +5,12 @@
 > (Organizations & Memberships) pede exatamente o que já foi entregue, então
 > nenhuma delas precisa ser refeita. Ver `docs/adr/ADR-0017-technical-model-domain.md`
 > para o motivo da revisão.
+>
+> **Atualização pós-Task 04:** o catálogo oficial da Fase 1 ficou definido em
+> exatamente 14 modelos — ver `docs/product/technical-models/PHASE1_CATALOG.md`.
+> O catálogo de 20+ modelos SST/industrial pesquisado antes (`CATALOG_V1.md`)
+> vira `future_catalog`/`research_archive` e não dirige mais o MVP. O contrato
+> visual do documento emitido está em `docs/product/PDF_OUTPUT_DESIGN_SPEC.md`.
 
 Cada Task vira um PR pequeno/coerente. Não pular gates.
 
@@ -48,7 +54,7 @@ Gate: mesma estrutura suporta múltiplas verticais.
 
 ## Task 08 — Technical Model Catalog
 
-Entregar: `technical_models`, `technical_model_versions`, categorias, status, references, professional scope, fixtures.
+Entregar: `technical_models`, `technical_model_versions`, categorias, status, references, professional scope, fixtures. Fixtures iniciais devem cobrir alguns dos 14 modelos de `docs/product/technical-models/PHASE1_CATALOG.md` (não os 20+ de `CATALOG_V1.md`).
 
 Gate: versão publicada imutável.
 
@@ -170,7 +176,7 @@ Gate: aprovação server-side auditável.
 
 ## Task 25 — Report Renderer v1
 
-Entregar: HTML/CSS controlado, `PdfRenderer`, cover, TOC, header/footer, pagination, text, technical info, tables, photos, findings, signatures, refs/anexos, golden PDF tests.
+Entregar: HTML/CSS controlado, `PdfRenderer`, cover, TOC, header/footer, pagination, text, technical info, tables, photos, findings, signatures, refs/anexos, golden PDF tests. Seguir `docs/product/PDF_OUTPUT_DESIGN_SPEC.md`.
 
 Gate: render reprodutível a partir do mesmo snapshot/renderer version.
 
@@ -220,7 +226,7 @@ Gate: offline não perde dados persistidos.
 
 ## Task 33 — Initial Technical Model Catalog
 
-Meta: 15–20 modelos fortes inicialmente. Ver `docs/product/technical-models/CATALOG_V1.md` para a pesquisa já feita (candidatos, status de confiabilidade por fonte, referências oficiais).
+Fase 1 = os 14 modelos de `docs/product/technical-models/PHASE1_CATALOG.md` (não 15–20). Expansão para os modelos SST/industrial/ambiental de `CATALOG_V1.md` (`future_catalog`) só depois do MVP, guiada por uso real (Task 37).
 
 Gate: cada modelo possui pesquisa, fontes, requirement registry e status.
 

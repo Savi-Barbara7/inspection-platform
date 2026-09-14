@@ -1,4 +1,14 @@
 # Catálogo Inicial de Modelos Técnicos — Pesquisa v1
+
+> **`future_catalog` / `research_archive`.** O catálogo oficial da Fase 1 é
+> `docs/product/technical-models/PHASE1_CATALOG.md` (14 modelos: cautelar,
+> inspeção predial, patologias, estrutural, fachadas, entrega/recebimento de
+> obra, vistorias imobiliárias, avaliação de imóvel, sinistro, infiltrações,
+> elétrica). Os modelos SST/industrial/ambiental listados abaixo (NR-13, PGR,
+> AET, LTCAT, NR-12, NR-10, SPDA, PMOC, PGRS etc.) **não fazem parte do MVP e
+> não devem dirigir decisões de produto agora** — mantidos aqui como pesquisa
+> para expansão futura (ver Task 33 em `docs/product/ROADMAP_TASKS_V2.md`).
+
 Data: 2026-09-14.
 
 ## Prioridade de produto

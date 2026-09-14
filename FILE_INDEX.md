@@ -54,8 +54,10 @@
 - `docs/product/GLOSSARY.md`
 - `docs/product/ROADMAP.md`
 - `docs/product/ROADMAP_TASKS_V2.md` — Task 03.5–37
+- `docs/product/PDF_OUTPUT_DESIGN_SPEC.md` — contrato visual do documento emitido
+- `docs/product/technical-models/PHASE1_CATALOG.md` — catálogo oficial (14 modelos)
 - `docs/product/technical-models/RESEARCH_PROTOCOL.md`
-- `docs/product/technical-models/CATALOG_V1.md`
+- `docs/product/technical-models/CATALOG_V1.md` — future_catalog/research_archive
 - `docs/product/technical-models/SCHEMAS_V1.md`
 - `docs/runbooks/BACKUP_RESTORE.md`
 - `docs/runbooks/DEPLOYMENT.md`

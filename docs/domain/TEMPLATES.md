@@ -2,7 +2,8 @@
 
 > Realinhado na Task 03.5 — ver `docs/adr/ADR-0017-technical-model-domain.md`.
 > Substitui o par `InspectionTemplate`/`ReportTemplate` por uma hierarquia de
-> três níveis. Pesquisa de modelos reais em `docs/product/technical-models/`.
+> três níveis. Catálogo oficial da Fase 1: **14 modelos**, ver
+> `docs/product/technical-models/PHASE1_CATALOG.md`.
 
 ## Objetivo
 
