@@ -56,6 +56,7 @@ function stubFetch(handlers: {
   technicalJobs?: (url: string, init: RequestInit) => Response;
   organizationModelVersions?: (url: string, init: RequestInit) => Response;
   jobRuntimeValues?: (url: string, init: RequestInit) => Response;
+  groupItems?: (url: string, init: RequestInit) => Response;
   auditRpc?: (init: RequestInit) => Response;
 }) {
   vi.stubGlobal(
@@ -92,6 +93,9 @@ function stubFetch(handlers: {
         handlers.jobRuntimeValues
       ) {
         return handlers.jobRuntimeValues(url, init);
+      }
+      if (url.startsWith(`${env.SUPABASE_URL}/rest/v1/group_items`) && handlers.groupItems) {
+        return handlers.groupItems(url, init);
       }
       throw new Error(`unexpected fetch to ${url}`);
     })
@@ -234,6 +238,109 @@ describe("POST /api/v1/job-runtime-values", () => {
     });
     // Never the captured value itself in the audit log.
     expect(JSON.stringify(capturedAudit?.p_metadata)).not.toContain('"A"');
+  });
+
+  const groupItemId = "d0000000-0000-0000-0000-000000000001";
+  const areaNameBinding = {
+    id: "bind-area-name",
+    scope: { kind: "currentGroupItem" },
+    fieldId: "areaName"
+  };
+  const definitionWithRepeatableGroup = {
+    schemaVersion: 1,
+    dataBindings: [areaNameBinding],
+    sections: [
+      {
+        id: "sec-group",
+        title: "Áreas",
+        blocks: [],
+        repeatable: {
+          labelSingular: "Área",
+          labelPlural: "Áreas",
+          fields: [{ fieldId: "areaName", label: "Nome da área", fieldType: "text" }]
+        }
+      }
+    ]
+  };
+
+  it("10. resolves a currentGroupItem binding against the enclosing RepeatableGroup's own field schema, never a global registry", async () => {
+    let capturedBody: Record<string, unknown> | undefined;
+    stubFetch({
+      membership: membershipHandler("inspector"),
+      technicalJobs: () =>
+        new Response(JSON.stringify({ organization_model_version_id: versionId }), { status: 200 }),
+      organizationModelVersions: () =>
+        new Response(JSON.stringify({ definition: definitionWithRepeatableGroup }), {
+          status: 200
+        }),
+      groupItems: () =>
+        new Response(JSON.stringify({ definition_section_id: "sec-group" }), { status: 200 }),
+      jobRuntimeValues: (_url, init) => {
+        capturedBody = JSON.parse(init.body as string);
+        return new Response(
+          JSON.stringify({
+            ...capturedRow,
+            binding_id: "bind-area-name",
+            context: { kind: "groupItem", groupItemId },
+            field_type: "text",
+            captured_value: { kind: "resolved", scalar: { fieldType: "text", value: "Sala" } },
+            provenance: { type: "MANUAL_INPUT", capturedBy: "user-123", capturedAt: "x" },
+            source_customer_id: null
+          }),
+          { status: 201 }
+        );
+      }
+    });
+
+    const res = await app.request(
+      `/api/v1/job-runtime-values?${commonQuery}`,
+      {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          bindingId: "bind-area-name",
+          context: { kind: "groupItem", groupItemId },
+          value: { rawValue: "Sala" },
+          provenance: { type: "MANUAL_INPUT" }
+        })
+      },
+      env
+    );
+
+    expect(res.status).toBe(201);
+    expect(capturedBody).toMatchObject({
+      binding_id: "bind-area-name",
+      field_type: "text",
+      captured_value: { kind: "resolved", scalar: { fieldType: "text", value: "Sala" } }
+    });
+  });
+
+  it("rejects a currentGroupItem binding captured without a groupItem context", async () => {
+    stubFetch({
+      membership: membershipHandler("owner"),
+      technicalJobs: () =>
+        new Response(JSON.stringify({ organization_model_version_id: versionId }), { status: 200 }),
+      organizationModelVersions: () =>
+        new Response(JSON.stringify({ definition: definitionWithRepeatableGroup }), {
+          status: 200
+        })
+    });
+    const res = await app.request(
+      `/api/v1/job-runtime-values?${commonQuery}`,
+      {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          bindingId: "bind-area-name",
+          value: { rawValue: "Sala" },
+          provenance: { type: "MANUAL_INPUT" }
+        })
+      },
+      env
+    );
+    expect(res.status).toBe(422);
+    const body = await res.json();
+    expect(body).toMatchObject({ errors: [{ path: "bindingId" }] });
   });
 
   it("maps a cross-tenant source_customer_id FK violation to a clean 422", async () => {

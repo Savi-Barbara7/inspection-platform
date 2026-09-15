@@ -1,9 +1,10 @@
 import {
   getFieldDefinition,
-  resolveScopeSourceType,
-  type DataBinding
+  resolveScopeSourceType
 } from "@inspection-platform/domain/data-sources";
 import type { FieldType } from "@inspection-platform/domain/data-sources";
+import { findSectionById } from "@inspection-platform/domain/runtime-document-tree";
+import type { DocumentDefinition } from "@inspection-platform/domain/templates";
 import {
   InvalidRuntimeValueError,
   JOB_CONTEXT,
@@ -97,15 +98,23 @@ export function createSupabaseJobRuntimeValuesRepository(
   /**
    * Resolves `bindingId` against the job's OWN OrganizationModelVersion
    * (never the model's current draft — Task 14 section 35) to find its
-   * semantic FieldDefinition. Throws UnknownBindingIdError if the
-   * binding doesn't exist there, or if it resolves to a SourceType with
-   * no global field registry (GroupItem — not built yet).
+   * semantic field type. For every SourceType with a global
+   * FieldDefinition registry (Task 13) that's a plain catalog lookup.
+   * GroupItem is the one deliberate exception (Task 13 left its
+   * registry empty on purpose): when the binding resolves to GroupItem,
+   * `context` must carry a groupItemId, which is used to look up that
+   * GroupItem's own `definitionSectionId` and resolve the field against
+   * THAT RepeatableGroup's own declared `repeatable.fields` (Task 15
+   * section 8) — never a slug-keyed or global lookup. Throws
+   * UnknownBindingIdError if the binding doesn't exist, has no matching
+   * field, or (GroupItem) is captured without a groupItem context.
    */
   async function resolveBindingFieldType(
     authToken: string,
     organizationId: string,
     technicalJobId: string,
-    bindingId: string
+    bindingId: string,
+    context: RuntimeValueContext | undefined
   ): Promise<FieldType> {
     const jobResponse = await fetch(
       `${supabaseUrl}/rest/v1/technical_jobs?id=eq.${technicalJobId}&organization_id=eq.${organizationId}&select=organization_model_version_id`,
@@ -127,14 +136,31 @@ export function createSupabaseJobRuntimeValuesRepository(
         `get organization model version failed with status ${versionResponse.status}`
       );
     }
-    const { definition } = (await versionResponse.json()) as {
-      definition: { dataBindings?: DataBinding[] };
-    };
+    const { definition } = (await versionResponse.json()) as { definition: DocumentDefinition };
 
     const binding = (definition.dataBindings ?? []).find((b) => b.id === bindingId);
     if (!binding) throw new UnknownBindingIdError(bindingId);
 
     const sourceType = resolveScopeSourceType(binding.scope);
+
+    if (sourceType === "GroupItem") {
+      if (!context || context.kind !== "groupItem") throw new UnknownBindingIdError(bindingId);
+
+      const groupItemResponse = await fetch(
+        `${supabaseUrl}/rest/v1/group_items?id=eq.${context.groupItemId}&organization_id=eq.${organizationId}&technical_job_id=eq.${technicalJobId}&select=definition_section_id`,
+        { headers: headers(authToken, { Accept: "application/vnd.pgrst.object+json" }) }
+      );
+      if (!groupItemResponse.ok) throw new UnknownBindingIdError(bindingId);
+      const { definition_section_id } = (await groupItemResponse.json()) as {
+        definition_section_id: string;
+      };
+
+      const section = findSectionById(definition.sections, definition_section_id);
+      const fieldDef = section?.repeatable?.fields.find((f) => f.fieldId === binding.fieldId);
+      if (!fieldDef) throw new UnknownBindingIdError(bindingId);
+      return fieldDef.fieldType;
+    }
+
     const fieldDef = getFieldDefinition(sourceType, binding.fieldId);
     if (!fieldDef) throw new UnknownBindingIdError(bindingId);
     return fieldDef.fieldType;
@@ -185,7 +211,8 @@ export function createSupabaseJobRuntimeValuesRepository(
         authToken,
         organizationId,
         technicalJobId,
-        input.bindingId
+        input.bindingId,
+        input.context
       );
       const capturedValue = resolveValueInput(fieldType, input.value);
       if (capturedValue.kind === "invalid") {
