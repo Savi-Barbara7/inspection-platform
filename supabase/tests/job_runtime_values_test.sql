@@ -57,10 +57,11 @@ select public.derive_organization_model(
   null
 );
 
-insert into public.technical_jobs (organization_id, organization_model_version_id)
+insert into public.technical_jobs (organization_id, organization_model_version_id, name)
 values (
   '90000000-0000-0000-0000-000000000001',
-  (select current_draft_version_id from public.organization_models where organization_id = '90000000-0000-0000-0000-000000000001')
+  (select current_draft_version_id from public.organization_models where organization_id = '90000000-0000-0000-0000-000000000001'),
+  'JRV Test Job'
 );
 
 select is(
@@ -152,10 +153,11 @@ select public.derive_organization_model(
 reset role;
 
 select throws_ok(
-  $$ insert into public.technical_jobs (organization_id, organization_model_version_id)
+  $$ insert into public.technical_jobs (organization_id, organization_model_version_id, name)
      values (
        '90000000-0000-0000-0000-000000000001',
-       (select current_draft_version_id from public.organization_models where organization_id = '90000000-0000-0000-0000-000000000002')
+       (select current_draft_version_id from public.organization_models where organization_id = '90000000-0000-0000-0000-000000000002'),
+       'Cross Tenant Test Job'
      ) $$,
   '23503',
   null,
@@ -275,8 +277,8 @@ select throws_ok(
 );
 
 select throws_ok(
-  $$ insert into public.technical_jobs (organization_id, organization_model_version_id)
-     values ('90000000-0000-0000-0000-000000000001', (select current_draft_version_id from public.organization_models where organization_id = '90000000-0000-0000-0000-000000000001')) $$,
+  $$ insert into public.technical_jobs (organization_id, organization_model_version_id, name)
+     values ('90000000-0000-0000-0000-000000000001', (select current_draft_version_id from public.organization_models where organization_id = '90000000-0000-0000-0000-000000000001'), 'Viewer Attempt Job') $$,
   '42501',
   null,
   'Viewer A cannot create a technical_job (lacks job.create)'
