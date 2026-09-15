@@ -92,25 +92,40 @@ Gate: remoção de requisito obrigatório nunca passa silenciosamente como compa
 
 Entregue: `packages/domain/src/templates/requirements.ts` (`Requirement`, `RequirementOverride`, `validateRequirements()`, `validateRequirementOverrides()`, `evaluateCompatibility()` — puro, sem I/O) + `20260915000000_requirement_compatibility_guard.sql` (`technical_model_versions.requirements`, `organization_model_versions.requirement_overrides`/`compatibility_status`/`compatibility_violations`, sem nova tabela/RLS/grant). `compatibilityStatus` é recalculado pela API a cada `PATCH /:id/draft` (nunca aceito como valor do cliente); vira `incompatible` se, e somente se, um requisito `required` perder cobertura sem um `requirementOverride` correspondente com motivo — `recommended`/`optional` nunca afetam o status. Override para um `requirementId` inexistente no registro da `TechnicalModelVersion` de origem é rejeitado com 422 (`UnknownRequirementIdError`), nunca ignorado silenciosamente. Nenhum dos 14 modelos da Fase 1 recebeu requisitos regulatórios reais (registry vazio, trivialmente compatível) — evita alegação de conformidade sem fonte/revisão, conforme já estabelecido para `research_status`. Risco residual aceito e documentado (mesma classe de `organizations.settings`/`sites.address`): a coluna `compatibility_status` não é recalculada por trigger no Postgres, só pela API — ver `docs/domain/TEMPLATES.md`. Testes: 15 testes Vitest de domínio (`requirements.test.ts`, incluindo o teste "THE GATE"), 6 testes Vitest de API cobrindo o fluxo completo (gate flipando para incompatible, override limpando a violação, requirementId desconhecido rejeitado, reason em branco rejeitado, campo desconhecido rejeitado), 11 asserções pgTAP (`requirement_compatibility_guard_test.sql`, cobrindo defaults, CHECK constraint, e o risco residual documentado como fato observado). Verificado ponta a ponta via `wrangler dev` contra Supabase local real (requisito fictício populado diretamente, remoção do bloco cobridor via PATCH flipando o status, override com motivo revertendo, requirementId desconhecido rejeitado com 422).
 
-## Task 12 — Organization Model Publish & Immutability
+## Task 12 — Organization Model Publish & Immutability ✅ concluída
 
 Entregar: draft/publish, published immutable, clone-to-draft, diff, audit.
 
 Gate: não existe API legítima de update em published.
 
-## Task 13 — Technical Job Foundation
+Entregue: `packages/domain/src/organization-models` (`publish()`, `getPublishedVersion()`, `OrganizationModelIncompatibleError`/`OrganizationModelVersionNotDraftError`/`OrganizationModelVersionConflictError`) + `apps/api/src/organization-models` (`POST /:id/publish`, `GET /:id/published`) + `20260915010000_organization_model_publish_immutability.sql`. `organization_models.current_published_version_id` é identidade explícita (nunca inferida por timestamp/version_number), com FK composta mesmo-modelo-seguro `(id, organization_model_id)` — mesma proteção retroativamente aplicada a `current_draft_version_id`. `publish_organization_model_version()` (RPC `SECURITY DEFINER`) congela o rascunho atômicamente (`status='published'`, `published_at`) e abre o próximo rascunho como cópia exata, com `version_number` sequencial (nunca timestamp). Compatibilidade nunca é confiada: `apps/api` recomputa `evaluateCompatibility()` (Task 11) a partir do rascunho recém-lido antes de sequer chamar a RPC; a RPC ainda rejeita (`55000` → 409) se a linha não estiver mais em `draft` (publish duplicado/retry nunca cria versão extra) e (`40001` → 409) se `updated_at` mudou entre a leitura da API e o lock da transação (edição concorrente invalidando a compatibilidade computada). Imutabilidade é reforçada por um trigger `BEFORE UPDATE` no Postgres (`prevent_published_organization_model_version_mutation`, compara a linha inteira via `jsonb` exceto `archived_at`/`updated_at`) — vale até para o owner/admin/template_manager da própria organização, não só "a UI não chama PATCH". Capability `organization_model.publish` reaproveitada tal como existia desde a Task 05, sem mudança de matriz. Testes: 25 asserções pgTAP (`organization_model_publish_test.sql` — ciclo completo v1→v2→v3, imutabilidade sob role normal, publish duplicado, conflito de concorrência, cross-tenant, FK composta mesmo-modelo) + 14 testes Vitest de API (capability matrix, gate de incompatibilidade, conflitos 409, leitura da versão publicada). Verificado ponta a ponta via `wrangler dev` contra Supabase local real (derivar → publicar v1 → editar v2 → publicar v2 → tentar UPDATE direto via psql na v1 publicada, bloqueado pelo trigger → remover cobertura de um requisito obrigatório no v3 → tentativa de publish bloqueada com 422).
 
-Entregar: `technical_jobs`, bindings customer/site/asset/model version, responsável, status, datas, snapshots, RLS.
+Decisões de produto registradas nesta task (sem implementação — apenas roadmap/documentação, ver seções 20–23 da instrução original):
 
-Gate: todo trabalho aponta para versão reproduzível do modelo.
+- **Catálogo de lançamento**: os 14 modelos de Fase 1/pesquisa (`docs/product/technical-models/PHASE1_CATALOG.md`) permanecem intactos no banco, sem reescrita da Task 08. O pacote comercial do MVP foi refinado para 4 modelos-base — Vistoria Cautelar de Vizinhança, Laudo de Entrega de Empreendimento, Laudo de Sinistro/Danos, Laudo de Transição de Construtora — mais 1 derivado (Comparativo/Revistoria, baseado em baseline anterior). Ativação final do launch pack é a Task 31. Os demais modelos ficam como catálogo futuro/research.
+- **Padrão editorial único do MVP**: "Atlas Technical Classic", inspirado na formatação mais madura do Laudo Cautelar/Lindeiro já validada no LVL Pro — mesma gramática (capa, sumário, margens, hierarquia, títulos, paginação, tabelas, registro fotográfico, anexos, conclusão, responsabilidade, assinaturas) para todos os modelos, que diferem apenas por conteúdo/composição. Formalizado na Task 25; nenhum renderer implementado ainda.
+- **Camada de gestão do trabalho técnico**: Atlas terá uma camada de overview/status/responsável/equipe/progresso/documentos/evidências/histórico/emissões — formalizada na Task 24, não implementada ainda.
+- **Field app adiado**: nenhum PWA de campo/câmera/voice capture/offline/sync mobile nesta fase — consolidado em Task 36+, guiado por uso real pós-piloto. A arquitetura atual não deve ser desenhada em torno de UX mobile específica, mas também não deve criar impedimentos artificiais para esse suporte futuro.
 
-## Task 14 — Structured Job Runtime
+## Task 13 — Typed Data Sources, Roles & Bindings
 
-Entregar: section state, structured values, completion, validation, revision optimistic concurrency, save/submit, state machine.
+Entregar: tipos de dado versionados por campo/tabela, roles de vínculo (customer/site/asset/professional), bindings tipados entre `OrganizationModelVersion` e as entidades reais que um job vai referenciar.
 
-Gate: stale revision gera conflito.
+Gate: um binding nunca aponta para uma entidade de outra organização (FK composta tenant-safe, mesmo padrão já usado em customers/sites/assets e organization-models).
 
-## Task 15 — Evidence Foundation
+## Task 14 — Job Runtime Values, Provenance & Overrides
+
+Entregar: o contrato de "valor real preenchido durante um job" — distinto e nunca gravado em `OrganizationModelVersion.definition` (ver Task 10 "Schema vs. dado real de trabalho"). Provenance (qual definition/version originou o valor) e overrides em nível de runtime (não confundir com `requirement_overrides` da Task 11, que é sobre a definição, não sobre um job específico).
+
+Gate: dado de trabalho real nunca é gravado em uma tabela de definição/template.
+
+## Task 15 — Technical Job Foundation & Runtime Document Tree
+
+Entregar: `technical_jobs`, bindings customer/site/asset/model version (usando a Task 13), responsável, status, datas, snapshot da `OrganizationModelVersion` publicada usada, árvore de documento em runtime (instância navegável da `DocumentDefinition` publicada, preenchível), RLS.
+
+Gate: todo trabalho aponta para uma versão publicada e imutável do modelo (nunca um draft).
+
+## Task 16 — Evidence Foundation
 
 Tipos MVP: photo, document, signature.
 
@@ -118,7 +133,7 @@ Entregar: `evidence`, `StorageProvider`, private storage, signed URLs curtas, MI
 
 Gate: tenant B nunca acessa evidência de A.
 
-## Task 16 — Structured Folder Import
+## Task 17 — Structured Folder Import
 
 Entregar: import session, `relative_path`, folder hierarchy, filename, metadata, natural ordering, dry-run, preview da árvore, confirmação, resume.
 
@@ -126,61 +141,81 @@ Regra: estrutura de pastas é dado de primeira classe.
 
 Gate: mesmo input → mesma estrutura e ordem.
 
-## Task 17 — Photo Workspace
+## Task 18 — Photo Scale & Batch Operations
 
-Entregar: árvore de ambientes/pastas, galeria, preview, seleção simples/múltipla, Shift+click, teclado, contagem por ambiente, include/exclude, mover, legenda, filtros, virtualização.
+Consolida o antigo "Photo Workspace" + "Evidence Ordering/Range Selection/Batch Operations". **Substitui integralmente qualquer proposta anterior de organização automática por IA.**
 
-Gate: uso fluido com centenas/milhares de fotos.
-
-## Task 18 — Evidence Ordering, Range Selection & Batch Operations
-
-**Substitui integralmente qualquer proposta anterior de organização automática por IA.**
-
-Objetivo: operações humanas, previsíveis, rápidas e auditáveis.
-
-Entregar: preservar ordem original; natural sort; ordenar por captura/importação; reorder manual persistido; modo Selecionar intervalo; marcar primeira imagem; marcar última imagem; mostrar quantidade exata; excluir/restaurar intervalo; mover intervalo; incluir/excluir do laudo; alterar ambiente; aplicar/limpar legenda; renomear por padrão; tags; exportar seleção; confirmação destrutiva; soft-delete ou mecanismo recuperável; audit event.
+Entregar: árvore de ambientes/pastas, galeria, preview, seleção simples/múltipla, Shift+click, teclado, contagem por ambiente; preservar ordem original; natural sort; ordenar por captura/importação; reorder manual persistido; modo Selecionar intervalo; marcar primeira/última imagem; excluir/restaurar/mover intervalo; incluir/excluir do laudo; alterar ambiente; legenda; tags; exportar seleção; confirmação destrutiva; soft-delete/mecanismo recuperável; audit event; virtualização para centenas/milhares de fotos.
 
 Proibido: IA mover; IA apagar; IA renomear; IA classificar automaticamente no core.
 
-Gate: operações determinísticas, auditáveis e reversíveis quando aplicável.
+Gate: operações determinísticas, auditáveis, reversíveis quando aplicável, fluidas em escala.
 
-## Task 19 — Image Annotation
+## Task 19 — Image Annotation & Derivatives
 
-Entregar: seta, retângulo, círculo, texto, derivative anotado, original imutável.
+Entregar: seta, retângulo, círculo, texto, derivative anotado, original imutável, versionamento de derivados.
 
 Gate: original nunca é sobrescrito.
 
-## Task 20 — Table Engine
+## Task 20 — Documents & Communications
 
-Modos: sistema, Excel, CSV, documento externo.
+Consolida o antigo "Table Engine" (dados) e "Documents & Attachments" (ART/RRT/TRT, plantas, certificados, ensaios, memoriais, relatórios — referência/processo/listar/anexo final) com um componente novo de comunicações do trabalho (registro de trocas relevantes ao job).
 
-Entregar: columns, rows, types, units, validation, source, import mapping, preview.
+Gate: dados de tabela separados do PDF; original de documento rastreável.
 
-Gate: dados separados do PDF.
+## Task 21 — Findings, Pendencies, Tables & Checklists Runtime
 
-## Task 21 — Documents & Attachments
+Consolida "Findings/Constatações" com pendências e o runtime de tabelas/checklists de um job real (distinto do `Table`/`TechnicalInformation` do block engine, que é só schema — Task 09/14).
 
-Suportar ART/RRT/TRT, plantas, certificados, ensaios, memoriais, relatórios.
-
-Modos: referência, processo, listar, incorporar como anexo final.
-
-Gate: original rastreável.
-
-## Task 22 — Findings / Constatações
-
-Entregar: title, description, severity, status, location/section/block, evidence, responsible, recommendation, due date.
+Entregar: title, description, severity, status, location/section/block, evidence, responsible, recommendation, due date; pendências com dono e prazo; checklist runtime.
 
 Gate: bloco Findings usa a entidade sem duplicar dados.
 
-## Task 23 — Structured Conclusion
+## Task 22 — Baseline & Comparison Engine
 
-Entregar: base text, variables, summaries, finding references, editor, snapshot.
+Entregar: mecanismo de baseline (uma emissão anterior) e comparação estruturada contra ela — a base técnica do modelo derivado "Comparativo/Revistoria" (ver decisão de catálogo na Task 12).
+
+Gate: uma comparação sempre referencia uma emissão concreta e imutável, nunca um draft.
+
+## Task 23 — Structured Text, Content Fragments & Conclusion
+
+Entregar: base text, variables, summaries, finding references, fragmentos de conteúdo reutilizáveis, editor, snapshot.
 
 Regra: IA futura só sugere; profissional aprova.
 
 Gate: texto emitido = aprovado.
 
-## Task 24 — Review & Approval
+## Task 24 — Technical Work Management Layer
+
+Formaliza a decisão registrada na Task 12: overview do trabalho técnico, status, responsável, equipe, progresso, documentos, evidências, histórico, emissões.
+
+Gate: estado do trabalho é sempre derivável do dado real (job/evidence/findings/report), nunca uma cópia paralela que pode dessincronizar.
+
+## Task 25 — Atlas Document Standard / Technical Classic
+
+Formaliza a decisão registrada na Task 12: um único padrão editorial ("Atlas Technical Classic") para todo o MVP — capa, sumário, margens, hierarquia, títulos, paginação, tabelas, registro fotográfico, anexos, conclusão, responsabilidade, assinaturas. Modelos diferem por conteúdo/composição, nunca por gramática visual.
+
+Gate: qualquer um dos modelos de lançamento produz um documento na mesma gramática visual.
+
+## Task 26 — Document Projection, RenderPlan, PagePlan & Preflight
+
+Entregar: projeção de um job + `OrganizationModelVersion` publicada + Atlas Technical Classic em um `RenderPlan`/`PagePlan` — a estrutura intermediária que o renderer de fato consome, com preflight (validação de completude/pendências) antes de qualquer render.
+
+Gate: um `RenderPlan` é determinístico a partir do mesmo job/snapshot; preflight bloqueia render de trabalho incompleto.
+
+## Task 27 — PDF Renderer v1
+
+Entregar: HTML/CSS controlado, `PdfRenderer` consumindo o `RenderPlan` da Task 26, cover, TOC, header/footer, pagination, text, technical info, tables, photos, findings, signatures, refs/anexos, golden PDF tests. Seguir `docs/product/PDF_OUTPUT_DESIGN_SPEC.md`.
+
+Gate: render reprodutível a partir do mesmo `RenderPlan`/renderer version.
+
+## Task 28 — Output Partitions / Volumes
+
+Entregar: particionamento de um documento grande em volumes/partes de saída (ex.: anexos separados, volumes por tamanho) quando o `RenderPlan` exigir.
+
+Gate: partições de um mesmo documento permanecem referenciáveis e coerentes entre si.
+
+## Task 29 — Review & Approval
 
 Estados: draft, in_progress, under_review, changes_requested, approved, ready_to_sign.
 
@@ -188,84 +223,48 @@ Comentários por section/block/field.
 
 Gate: aprovação server-side auditável.
 
-## Task 25 — Report Renderer v1
+## Task 30 — Signature, Emission Snapshot & Report Versions
 
-Entregar: HTML/CSS controlado, `PdfRenderer`, cover, TOC, header/footer, pagination, text, technical info, tables, photos, findings, signatures, refs/anexos, golden PDF tests. Seguir `docs/product/PDF_OUTPUT_DESIGN_SPEC.md`.
+Consolida "Signature Abstraction", "Report Issuance" e "Report Versions & Supersede".
 
-Gate: render reprodutível a partir do mesmo snapshot/renderer version.
+Entregar: `SignatureProvider` (assinatura capturada, identidade, timestamp, method/provider metadata — domínio não depende de fornecedor; ICP-Brasil/gov.br é um provider futuro); fluxo de emissão (authorize → validate → freeze job/model/layout/assets → render → hash → persist → `EmissionSnapshot`/`ReportVersion` → audit); versionamento (v1/v2, motivo, supersedes, histórico, download).
 
-## Task 26 — Organization Branding
+Gate: emitido é imutável; versão antiga nunca desaparece silenciosamente.
 
-Entregar: logo, razão social, nome, CNPJ, endereço, contatos, site, cores, registros profissionais, cabeçalho/rodapé/capa padrão.
+## Task 31 — Launch Model Pack — 4 base + Comparative
 
-Gate: configurar uma vez, reutilizar em todos os documentos.
+Ativação comercial da decisão de catálogo registrada na Task 12: os 4 modelos-base (Vistoria Cautelar de Vizinhança, Laudo de Entrega de Empreendimento, Laudo de Sinistro/Danos, Laudo de Transição de Construtora) mais o derivado Comparativo/Revistoria, prontos ponta a ponta (derivação → publish → job → render → emissão) sob o Atlas Technical Classic.
 
-## Task 27 — Full Report Preview
+Gate: os 5 modelos de lançamento produzem um laudo emitido completo e reproduzível.
 
-Entregar: preview A4, navegação por TOC, warnings, contagem de assets/fotos/tabelas, status de assinatura.
+## Task 32 — Desktop Frontend v1
 
-Gate: pendências visíveis antes da emissão.
+Entregar: frontend desktop (admin-web) cobrindo o fluxo completo do MVP — customização de modelo, gestão do trabalho técnico (Task 24), evidências, revisão, emissão.
 
-## Task 28 — Signature Abstraction
+Gate: um usuário completa o fluxo inteiro sem depender de chamadas diretas à API.
 
-Entregar: `SignatureProvider`, requests, assinatura capturada, identidade, timestamp, method/provider metadata.
+## Task 33 — Cross-model Consistency & Regression
 
-Futuro: ICP-Brasil/provedores/gov.br após validação.
+Entregar: suíte de regressão cruzando os 5 modelos de lançamento — mesmo Atlas Technical Classic, mesmo pipeline de publish/job/render, sem drift silencioso entre modelos.
 
-Gate: domínio não depende de fornecedor.
+Gate: uma mudança no pipeline nunca quebra um modelo silenciosamente sem os outros acusarem.
 
-## Task 29 — Report Issuance
+## Task 34 — Observability, Recovery & Large-document Hardening
 
-Fluxo: authorize → validate → freeze job/model/layout/assets → render → hash → persist → ReportVersion → audit.
+Consolida "Observability & Recovery" com hardening específico para documentos grandes (muitas fotos/páginas/volumes).
 
-Gate: emitido é imutável.
+Entregar: structured logs, error tracking, request_id, jobs, PDF/storage/DB monitoring, backup verification, restore test, runbooks, limites/timeouts testados para documentos grandes.
 
-## Task 30 — Report Versions & Supersede
+Gate: falhas importantes são detectáveis e investigáveis; documento grande não derruba o sistema.
 
-Entregar: v1/v2, motivo, supersedes, histórico, download, audit.
-
-Gate: versão antiga não desaparece silenciosamente.
-
-## Task 31 — Field App
-
-Entregar: meus trabalhos, hoje/próximos, seções, campos, foto, finding, assinatura, progresso, submit.
-
-Gate: técnico não usa painel administrativo para trabalhar em campo.
-
-## Task 32 — Offline Sync
-
-Entregar: local store, outbox, operation_id, device_id, base_revision, retries, pending uploads, conflicts, sync status.
-
-Gate: offline não perde dados persistidos.
-
-## Task 33 — Initial Technical Model Catalog
-
-Fase 1 = os 14 modelos de `docs/product/technical-models/PHASE1_CATALOG.md` (não 15–20). Expansão para os modelos SST/industrial/ambiental de `CATALOG_V1.md` (`future_catalog`) só depois do MVP, guiada por uso real (Task 37).
-
-Gate: cada modelo possui pesquisa, fontes, requirement registry e status.
-
-## Task 34 — Technical Research Registry
-
-Entregar: `reference_type`/name/version, locator, `checked_at`, requirement mapping, reviewer, review_status, restrictions.
-
-Gate: requisito técnico importante é rastreável.
-
-## Task 35 — Observability & Recovery
-
-Entregar: structured logs, error tracking, request_id, jobs, PDF/storage/DB monitoring, backup verification, restore test, runbooks.
-
-Gate: falhas importantes são detectáveis e investigáveis.
-
-## Task 36 — Billing
-
-Validar combinação: usuários + trabalhos/laudos + armazenamento + recursos.
-
-Gate: negócio consulta entitlements, não nome de plano.
-
-## Task 37 — Closed Pilot
+## Task 35 — Closed Pilot
 
 3–5 organizações.
 
 Medir: tempo primeiro laudo, organização de fotos, tempo total, retrabalho, erros, operações manuais, satisfação, storage, render time, suporte.
 
 Gate: pós-MVP guiado por uso real.
+
+## Task 36+ — Expansão futura
+
+Field App (PWA de campo, câmera, voice capture, offline/sync — adiado desde a Task 12); expansão de catálogo para os modelos SST/industrial/ambiental de `CATALOG_V1.md` (`future_catalog`), guiada pelo uso real do piloto; integrações; billing (validar combinação usuários + trabalhos/laudos + armazenamento + recursos — negócio consulta entitlements, não nome de plano).

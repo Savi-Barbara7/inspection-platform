@@ -175,6 +175,37 @@ Nesta task, nenhum dos 14 modelos seedados da Fase 1 recebeu um registro de requ
 
 Popular requisitos regulatórios reais para qualquer um dos 14 modelos; publicação/imutabilidade de `OrganizationModelVersion` (Task 12); `TechnicalJob` (Task 13+); qualquer UI/editor visual para gerenciar requisitos ou overrides.
 
+## Publish & Immutability (Task 12)
+
+> **Implementação:** `packages/domain/src/organization-models` (porta
+> `publish()`, `getPublishedVersion()`, erros de domínio) +
+> `apps/api/src/organization-models` (rotas `POST /:id/publish` e
+> `GET /:id/published`) +
+> `supabase/migrations/20260915010000_organization_model_publish_immutability.sql`.
+
+Ciclo de vida de uma `OrganizationModelVersion`:
+
+```text
+draft --publish--> published (imutável) --(publish() cria automaticamente)--> novo draft --publish--> ...
+```
+
+`organization_models.current_published_version_id` é a identidade explícita da versão publicada atual — nunca inferida buscando a última linha `published` por timestamp/`version_number`. Junto com `current_draft_version_id`, ambos usam uma FK composta "mesmo-modelo-seguro": `foreign key (current_published_version_id, id) references organization_model_versions (id, organization_model_id)` — torna estruturalmente impossível um desses ponteiros apontar para uma versão de um `OrganizationModel` diferente, mesmo dentro da mesma organização (não só "mesmo tenant", que já era garantido desde a Task 10).
+
+**A publicação (`publish_organization_model_version`, RPC `SECURITY DEFINER`) é atômica**: congela o rascunho atual como `published` (com `published_at`) e, na mesma transação, abre o próximo rascunho como cópia exata (`definition`, `technical_model_version_id`, `requirement_overrides` — tudo copiado; apenas `id`/`version_number`/`status`/`created_at` são novos). `version_number` é sequencial e nunca baseado em timestamp (`v_draft.version_number + 1`).
+
+**Compatibilidade nunca é confiada — é recalculada no momento de publicar.** A API (`apps/api`) recomputa `evaluateCompatibility()` (Task 11) a partir do rascunho recém-lido, e só chama a RPC se o resultado for `compatible`; bloqueia com 422 (`OrganizationModelIncompatibleError`, violations inclusas) sem sequer tentar a RPC caso contrário. Isso é reforçado, não substituído, por dois checks estruturais dentro da própria RPC:
+
+1. **Idempotência/concorrência**: a RPC trava a linha do rascunho (`for update`) e rejeita (`55000`, `OrganizationModelVersionNotDraftError` → HTTP 409) se ela não estiver mais em `draft` — uma publicação duplicada/retry nunca cria uma versão extra nem republica silenciosamente.
+2. **Frescor da compatibilidade**: a API também envia o `updated_at` do rascunho que leu; se a linha travada tiver um `updated_at` diferente (editada entre a leitura da API e a RPC obter o lock), a RPC rejeita (`40001`, `OrganizationModelVersionConflictError` → HTTP 409) — a compatibilidade computada pela API seria, nesse caso, sobre um `definition` que já não é o que está prestes a ser publicado.
+
+**Imutabilidade é reforçada no Postgres, não só prometida pela API.** Um trigger `BEFORE UPDATE` (`prevent_published_organization_model_version_mutation`) compara a linha inteira via `jsonb` (exceto `archived_at`/`updated_at`) sempre que `OLD.status = 'published'`, e rejeita qualquer diferença com `55000` — vale até para o próprio owner/admin/template_manager da organização fazendo um UPDATE direto via PostgREST/psql, não apenas "a UI não chama PATCH". `DELETE` já era totalmente revogado desde a Task 10.
+
+Requirement overrides continuam explícitos: publicar nunca cria um override sozinho para destravar uma incompatibilidade — o usuário precisa ter gravado o override (com motivo) antes, via o mesmo `PATCH /:id/draft` da Task 11.
+
+### Fora de escopo da Task 12 (deliberado)
+
+`TechnicalJob` e qualquer execução real (Task 13+); `EmissionSnapshot`; renderizador/PDF/`RenderPlan`; fotos/evidência real; editor visual/frontend. `OrganizationModel.name` (metadata do modelo, não da versão) continua editável livremente mesmo depois de publicações — renomear o modelo nunca altera nenhuma `OrganizationModelVersion` histórica.
+
 ## Contratos (mantidos do modelo anterior, agora por seção/bloco)
 
 `data_schema_json`-equivalente: contrato de dados de cada bloco (ex.: campos do `TechnicalInformation`).

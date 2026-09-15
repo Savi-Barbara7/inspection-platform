@@ -114,27 +114,28 @@ No `contacts` table yet -- out of scope for Task 07; `email`/`phone` on customer
 
 No client-facing write path at all: `authenticated` has `SELECT` only (RLS: `active` models, `published`/`superseded` versions), `anon` has no grant. Write is migration/seed-only -- see `docs/domain/TEMPLATES.md` "Quem escreve".
 
-### organization_models (Task 10 — implemented)
+### organization_models (Task 10 — implemented; Task 12 added current_published_version_id)
 
 - id uuid pk
 - organization_id uuid fk -> organizations (tenant-owned, unlike `technical_models`)
 - technical_model_id uuid fk -> technical_models (the catalog entry this was derived from; the catalog itself is never altered)
 - name text
-- current_draft_version_id uuid null, fk -> organization_model_versions (added via ALTER TABLE)
+- current_draft_version_id uuid null, composite fk -> organization_model_versions(id, organization_model_id) (Task 12: same-model-safe, not just same-tenant -- replaced the Task 10 plain FK)
+- current_published_version_id uuid null, composite fk -> organization_model_versions(id, organization_model_id) (Task 12: explicit identity of the live published version -- never inferred from the latest `published` row by timestamp/version_number)
 - archived_at timestamptz null (no hard delete)
 - created_at, updated_at timestamptz
 - unique(id, organization_id) (lets child tables use the tenant-safe composite FK pattern)
 
 RLS: `SELECT` via `is_org_member`; `INSERT`/`UPDATE` via `has_org_role(organization_id, array['owner','admin','template_manager'])`; `DELETE` revoked from `authenticated`/`anon` entirely.
 
-### organization_model_versions (Task 10 — implemented)
+### organization_model_versions (Task 10 — implemented; Task 12 added publish/immutability)
 
 - id uuid pk
 - organization_id uuid (denormalized from the parent model, for the composite FK and for RLS)
 - organization_model_id uuid, composite fk -> organization_models(id, organization_id) (structurally impossible to point at another organization's model, even with an internally-consistent `organization_id` on this row)
-- technical_model_version_id uuid fk -> technical_model_versions (provenance: which published version this was derived/rebased from — never lost)
-- version_number integer
-- status text (`draft` | `published` | `archived` — Task 10 only ever writes `draft`; `published`/`archived` exist for Task 12's publish/immutability gate)
+- technical_model_version_id uuid fk -> technical_model_versions (provenance: which published version this was derived/rebased from — never lost; immutable once a version is published, enforced by the Task 12 trigger below)
+- version_number integer, sequential per `organization_model_id` (never timestamp-based) -- `unique(organization_model_id, version_number)`, and `unique(id, organization_model_id)` (Task 12, backs the composite FKs on `organization_models` above)
+- status text (`draft` | `published` | `archived`) -- Task 10 only ever wrote `draft`; Task 12's `publish_organization_model_version()` is the only writer of `published`
 - title text
 - description text null
 - definition jsonb (a `DocumentDefinition`; copied verbatim from the source `technical_model_versions.definition` at derivation time — never starts blank)
@@ -143,11 +144,14 @@ RLS: `SELECT` via `is_org_member`; `INSERT`/`UPDATE` via `has_org_role(organizat
 - compatibility_status text, default `'compatible'`, `check (in ('compatible','incompatible'))` (Task 11: server-computed only — see the accepted residual-risk note below and in `docs/domain/TEMPLATES.md`)
 - compatibility_violations jsonb, default `'[]'` (Task 11: the required, uncovered, non-overridden requirements driving `compatibility_status = 'incompatible'`)
 - created_at, updated_at, published_at, archived_at timestamptz
-- unique(organization_model_id, version_number)
 
 RLS: same shape as `organization_models` (`SELECT` via `is_org_member`, role-gated `INSERT`/`UPDATE`, `DELETE` revoked). Creation goes through `derive_organization_model(p_organization_id, p_technical_model_id, p_name)`, a `SECURITY DEFINER` RPC that atomically inserts both the `organization_models` row and its initial draft `organization_model_versions` row, re-checks `has_org_role` itself (SECURITY DEFINER bypasses RLS), and rejects (`P0002`) a `technical_models` row that is not `active` or has no `current_published_version_id`. `EXECUTE` is explicitly revoked from `anon`, granted to `authenticated` only, in the same migration that creates the function (see the Task 05.1 lesson in AGENTS.md about `pg_default_acl`).
 
 A structured PATCH on the draft (title/description/definition/requirementOverrides) goes through plain RLS-gated PostgREST — no dedicated RPC, since it is a single-row update with no cross-table atomicity concern. Any `definition` in that PATCH must already have passed `validateDocumentDefinition()` (Task 09) at the API layer before it reaches PostgREST; the 13 block schemas are never re-declared in `apps/api`. Likewise, any `requirementOverrides` must already have passed `validateRequirementOverrides()` for shape, and every `requirementId` in it must exist on the source `technical_model_versions.requirements` (checked by the repository, `UnknownRequirementIdError` -> 422). `compatibility_status`/`compatibility_violations` are recomputed by the API layer (`evaluateCompatibility()`, Task 11) on every draft write and are never accepted as client input — see `docs/domain/TEMPLATES.md` "Requirements & Compatibility" for the accepted residual risk of a caller bypassing the API with a raw PostgREST PATCH to these two columns (same class already accepted for `organizations.settings`/`sites.address`).
+
+**Publish (Task 12)**: `publish_organization_model_version(p_organization_id, p_organization_model_id, p_draft_version_id, p_expected_updated_at, p_compatibility_status, p_compatibility_violations)`, another `SECURITY DEFINER` RPC, atomically: locks the draft row (`for update`), rejects (`55000`) if it is no longer `draft` (duplicate/retried publish -- never silently republishes or skips a version number), rejects (`40001`) if `updated_at` no longer matches `p_expected_updated_at` (the draft was edited after the caller's `apps/api` recomputed compatibility but before this transaction acquired its lock -- an optimistic concurrency check, not a full revision system), rejects (`23514`) if `p_compatibility_status = 'incompatible'`, then sets `status = 'published'`/`published_at = now()`, points `current_published_version_id` at it, and inserts the next `version_number + 1` draft as an exact copy (`definition`/`technical_model_version_id`/`requirement_overrides` all copied verbatim), pointing `current_draft_version_id` at it. The actual compatibility computation (`evaluateCompatibility()`, Task 11) is never duplicated in SQL -- `apps/api` recomputes it from the live draft it just read and passes the result in; this RPC only re-verifies structurally what it can (row still a draft, row unchanged since that computation) before trusting it.
+
+**Immutability (Task 12)**: a `BEFORE UPDATE` trigger, `prevent_published_organization_model_version_mutation()`, compares the whole row via `to_jsonb(new) - 'archived_at' - 'updated_at' <> to_jsonb(old) - 'archived_at' - 'updated_at'` whenever `OLD.status = 'published'`, raising `55000` on any difference -- enforced in Postgres itself, for every role including the organization's own owner/admin/template_manager, not just an application-layer promise that the UI never sends that PATCH. `DELETE` was already fully revoked (Task 10). Comparing whole rows via `jsonb` means a column added in a future migration is protected automatically.
 
 ## Inspections
 

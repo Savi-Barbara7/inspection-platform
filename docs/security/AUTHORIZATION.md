@@ -90,6 +90,10 @@ role de tenant tem (nem nunca terá, sem uma decisão explícita) capacidade
 de escrita sobre `technical_models`/`technical_model_versions` — o
 catálogo global é somente leitura para todos eles.
 
+Nota (Task 12): `organization_model.publish` já existia desde a Task 05
+mas ficava sem nenhuma rota associada até `POST /:id/publish` chegar —
+reaproveitada tal como estava, sem nenhuma mudança na matriz de roles.
+
 Racional: `owner`/`admin` cobrem operação completa (billing fica só com
 `owner` + `billing_admin`, nunca `admin`, para separar "roda a operação" de
 "mexe em pagamento"). `organization.settings.manage` é a capability que
