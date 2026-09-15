@@ -10,7 +10,9 @@ const BEARER_PREFIX = "Bearer ";
  * traffic is expected on public routes. Pair with `requireAuth` on routes
  * that must reject unauthenticated callers.
  */
-export function withAuth(resolveProvider: (env: Bindings) => AuthProvider): MiddlewareHandler<AppEnv> {
+export function withAuth(
+  resolveProvider: (env: Bindings) => AuthProvider
+): MiddlewareHandler<AppEnv> {
   return async (c, next) => {
     const authHeader = c.req.header("Authorization");
 

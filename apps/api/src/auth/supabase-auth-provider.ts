@@ -11,7 +11,10 @@ type SupabaseUserResponse = {
  * a client-supplied user id: the id returned here always comes from Supabase
  * having verified the token itself.
  */
-export function createSupabaseAuthProvider(supabaseUrl: string, publishableKey: string): AuthProvider {
+export function createSupabaseAuthProvider(
+  supabaseUrl: string,
+  publishableKey: string
+): AuthProvider {
   return {
     async getUserFromToken(token: string): Promise<CurrentUser | null> {
       if (!token) return null;

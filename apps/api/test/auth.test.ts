@@ -25,7 +25,11 @@ describe("GET /api/v1/me", () => {
       vi.fn(async () => new Response(null, { status: 401 }))
     );
 
-    const res = await app.request("/api/v1/me", { headers: { Authorization: "Bearer invalid-token" } }, env);
+    const res = await app.request(
+      "/api/v1/me",
+      { headers: { Authorization: "Bearer invalid-token" } },
+      env
+    );
 
     expect(res.status).toBe(401);
   });
@@ -38,11 +42,17 @@ describe("GET /api/v1/me", () => {
         const headers = init.headers as Record<string, string>;
         expect(headers.Authorization).toBe("Bearer valid-token");
         expect(headers.apikey).toBe(env.SUPABASE_PUBLISHABLE_KEY);
-        return new Response(JSON.stringify({ id: "user-123", email: "person@example.com" }), { status: 200 });
+        return new Response(JSON.stringify({ id: "user-123", email: "person@example.com" }), {
+          status: 200
+        });
       })
     );
 
-    const res = await app.request("/api/v1/me", { headers: { Authorization: "Bearer valid-token" } }, env);
+    const res = await app.request(
+      "/api/v1/me",
+      { headers: { Authorization: "Bearer valid-token" } },
+      env
+    );
 
     expect(res.status).toBe(200);
     const body = await res.json();

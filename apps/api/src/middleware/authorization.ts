@@ -1,24 +1,46 @@
 import type { Context, MiddlewareHandler } from "hono";
-import { authorize, type Capability, type MembershipLookup } from "@inspection-platform/domain/authorization";
+import {
+  authorize,
+  type Capability,
+  type MembershipLookup
+} from "@inspection-platform/domain/authorization";
 import type { AppEnv, Bindings } from "../types";
 
 function unauthorized(c: Context<AppEnv>) {
   return c.json(
-    { type: "unauthorized", title: "Authentication required", status: 401, requestId: c.get("requestId"), errors: [] },
+    {
+      type: "unauthorized",
+      title: "Authentication required",
+      status: 401,
+      requestId: c.get("requestId"),
+      errors: []
+    },
     401
   );
 }
 
 function notFound(c: Context<AppEnv>) {
   return c.json(
-    { type: "not_found", title: "Organization not found", status: 404, requestId: c.get("requestId"), errors: [] },
+    {
+      type: "not_found",
+      title: "Organization not found",
+      status: 404,
+      requestId: c.get("requestId"),
+      errors: []
+    },
     404
   );
 }
 
 function forbidden(c: Context<AppEnv>) {
   return c.json(
-    { type: "forbidden", title: "Missing capability", status: 403, requestId: c.get("requestId"), errors: [] },
+    {
+      type: "forbidden",
+      title: "Missing capability",
+      status: 403,
+      requestId: c.get("requestId"),
+      errors: []
+    },
     403
   );
 }
@@ -42,7 +64,10 @@ export function requireCapability(
       return unauthorized(c);
     }
 
-    const membership = await resolveLookup(c.env).getActiveMembership(authToken, getOrganizationId(c));
+    const membership = await resolveLookup(c.env).getActiveMembership(
+      authToken,
+      getOrganizationId(c)
+    );
     if (!membership) {
       return notFound(c);
     }

@@ -50,13 +50,17 @@ describe("requireCapability middleware", () => {
 
   it("404s when the caller has no active membership in the organization", async () => {
     const app = buildApp(stubLookup(null));
-    const res = await app.request("/orgs/org-1/billing", { headers: { Authorization: "Bearer t" } });
+    const res = await app.request("/orgs/org-1/billing", {
+      headers: { Authorization: "Bearer t" }
+    });
     expect(res.status).toBe(404);
   });
 
   it("403s when the caller's role lacks the required capability", async () => {
     const app = buildApp(stubLookup({ role: "inspector" }));
-    const res = await app.request("/orgs/org-1/billing", { headers: { Authorization: "Bearer t" } });
+    const res = await app.request("/orgs/org-1/billing", {
+      headers: { Authorization: "Bearer t" }
+    });
     expect(res.status).toBe(403);
     const body = await res.json();
     expect(body).toMatchObject({ type: "forbidden", status: 403 });
@@ -64,7 +68,9 @@ describe("requireCapability middleware", () => {
 
   it("passes through when the role has the required capability", async () => {
     const app = buildApp(stubLookup({ role: "billing_admin" }));
-    const res = await app.request("/orgs/org-1/billing", { headers: { Authorization: "Bearer t" } });
+    const res = await app.request("/orgs/org-1/billing", {
+      headers: { Authorization: "Bearer t" }
+    });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
   });

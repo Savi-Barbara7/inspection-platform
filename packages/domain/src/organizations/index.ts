@@ -57,5 +57,9 @@ export class OrganizationSlugConflictError extends Error {
 export interface OrganizationsRepository {
   create(authToken: string, input: CreateOrganizationInput): Promise<Organization>;
   getById(authToken: string, id: string): Promise<Organization | null>;
-  update(authToken: string, id: string, patch: UpdateOrganizationInput): Promise<Organization | null>;
+  update(
+    authToken: string,
+    id: string,
+    patch: UpdateOrganizationInput
+  ): Promise<Organization | null>;
 }
