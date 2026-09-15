@@ -715,11 +715,17 @@ begin
   )
   returning * into v_new;
 
-  create temporary table if not exists tmp_group_item_clone_map (
+  -- ON COMMIT DROP means this table can never outlive the transaction
+  -- that created it (whether it commits or rolls back) -- always a
+  -- fresh, empty table per call, so no separate DELETE is needed (and
+  -- an unqualified one is rejected outright for the `authenticated`
+  -- role by Supabase's plan_filter safety guard: "DELETE requires a
+  -- WHERE clause"). No `if not exists` either, for the same reason:
+  -- a prior call's table cannot still be around to collide with.
+  create temporary table tmp_group_item_clone_map (
     old_id uuid primary key,
     new_id uuid not null
   ) on commit drop;
-  delete from tmp_group_item_clone_map;
 
   -- Parent-first traversal: a node's parent is either the shared
   -- container (unchanged across the clone) or an already-visited
