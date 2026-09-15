@@ -23,7 +23,12 @@ export type AuditAction =
   | "organization_model.archived"
   | "organization_model_version.created"
   | "organization_model_version.updated"
-  | "organization_model_version.published";
+  | "organization_model_version.published"
+  | "technical_job.created"
+  | "job_runtime_value.created"
+  | "job_runtime_value.overridden"
+  | "job_runtime_value.override_removed"
+  | "job_runtime_value.source_refreshed";
 
 export type AuditEntityType =
   | "organization"
@@ -31,7 +36,9 @@ export type AuditEntityType =
   | "site"
   | "asset"
   | "organization_model"
-  | "organization_model_version";
+  | "organization_model_version"
+  | "technical_job"
+  | "job_runtime_value";
 
 export interface AuditEvent {
   id: string;

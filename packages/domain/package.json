@@ -15,7 +15,9 @@
     "./sites-assets": "./src/sites-assets/index.ts",
     "./templates": "./src/templates/index.ts",
     "./organization-models": "./src/organization-models/index.ts",
-    "./data-sources": "./src/data-sources/index.ts"
+    "./data-sources": "./src/data-sources/index.ts",
+    "./job-runtime-values": "./src/job-runtime-values/index.ts",
+    "./technical-jobs": "./src/technical-jobs/index.ts"
   },
   "scripts": {
     "build": "tsc --noEmit",
