@@ -7,6 +7,9 @@ import {
   type RequirementOverride
 } from "@inspection-platform/domain/templates";
 import {
+  OrganizationModelIncompatibleError,
+  OrganizationModelVersionConflictError,
+  OrganizationModelVersionNotDraftError,
   UnknownRequirementIdError,
   UnpublishedTechnicalModelVersionError,
   type OrganizationModelsRepository
@@ -20,7 +23,8 @@ import { recordAuditEventBestEffort } from "../lib/audit-helpers";
 import {
   validationError,
   fieldValidationError,
-  notFoundError as notFoundErrorBase
+  notFoundError as notFoundErrorBase,
+  conflictError
 } from "../lib/http-errors";
 import type { AppEnv } from "../types";
 
@@ -30,6 +34,10 @@ function notFoundError(requestId: string) {
 
 function draftNotFoundError(requestId: string) {
   return notFoundErrorBase(requestId, "Draft version not found");
+}
+
+function publishedVersionNotFoundError(requestId: string) {
+  return notFoundErrorBase(requestId, "This organization model has never been published");
 }
 
 const validateOrganizationModelId = validateUuidParam("id");
@@ -383,6 +391,120 @@ export function createOrganizationModelsRoutes(
       });
 
       return c.json(draft);
+    }
+  );
+
+  routes.get(
+    "/:id/published",
+    requireAuth,
+    validateOrganizationModelId,
+    validateOrganizationIdQuery,
+    requireCapability("organization_model.read", getMembershipLookup, (c) =>
+      c.req.query("organizationId")!
+    ),
+    async (c) => {
+      const published = await getRepository(c.env).getPublishedVersion(
+        c.get("authToken")!,
+        c.req.query("organizationId")!,
+        c.req.param("id")
+      );
+      if (!published) {
+        return c.json(publishedVersionNotFoundError(c.get("requestId")), 404);
+      }
+      return c.json(published);
+    }
+  );
+
+  routes.post(
+    "/:id/publish",
+    requireAuth,
+    validateOrganizationModelId,
+    validateOrganizationIdQuery,
+    requireCapability("organization_model.publish", getMembershipLookup, (c) =>
+      c.req.query("organizationId")!
+    ),
+    async (c) => {
+      const authToken = c.get("authToken")!;
+      const organizationId = c.req.query("organizationId")!;
+      const organizationModelId = c.req.param("id");
+
+      let result;
+      try {
+        result = await getRepository(c.env).publish(authToken, organizationId, organizationModelId);
+      } catch (err) {
+        if (err instanceof OrganizationModelIncompatibleError) {
+          return c.json(
+            {
+              type: "validation_error",
+              title: "Organization model version is incompatible with its base model",
+              status: 422,
+              requestId: c.get("requestId"),
+              errors: err.violations.map((v) => ({ path: v.requirementId, message: v.label }))
+            },
+            422
+          );
+        }
+        if (err instanceof OrganizationModelVersionNotDraftError) {
+          return c.json(
+            conflictError(
+              c.get("requestId"),
+              "This version is no longer a draft (already published)"
+            ),
+            409
+          );
+        }
+        if (err instanceof OrganizationModelVersionConflictError) {
+          return c.json(
+            conflictError(
+              c.get("requestId"),
+              "This draft was modified concurrently — refresh and try again"
+            ),
+            409
+          );
+        }
+        throw err;
+      }
+      if (!result) {
+        return c.json(draftNotFoundError(c.get("requestId")), 404);
+      }
+
+      // Never the full definition -- only identifiers/counts, per the
+      // same audit-payload discipline as every other action here.
+      await recordAuditEventBestEffort(getAuditService(c.env), authToken, {
+        organizationId,
+        action: "organization_model_version.published",
+        entityType: "organization_model_version",
+        entityId: result.publishedVersion.id,
+        metadata: {
+          organizationModelId,
+          versionNumber: result.publishedVersion.versionNumber,
+          sourceTechnicalModelVersionId: result.publishedVersion.technicalModelVersionId,
+          compatibilityStatus: result.publishedVersion.compatibilityStatus,
+          sectionCount: result.publishedVersion.definition.sections.length,
+          overridesCount: result.publishedVersion.requirementOverrides.length,
+          previousPublishedVersionId: result.previousPublishedVersionId
+        },
+        requestId: c.get("requestId")
+      });
+
+      await recordAuditEventBestEffort(getAuditService(c.env), authToken, {
+        organizationId,
+        action: "organization_model_version.created",
+        entityType: "organization_model_version",
+        entityId: result.newDraftVersion.id,
+        metadata: {
+          organizationModelId,
+          versionNumber: result.newDraftVersion.versionNumber,
+          createdBy: "publish"
+        },
+        requestId: c.get("requestId")
+      });
+
+      return c.json({
+        organizationModel: result.organizationModel,
+        publishedVersion: result.publishedVersion,
+        draftVersion: result.newDraftVersion
+      });
     }
   );
 

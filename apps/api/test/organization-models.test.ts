@@ -25,6 +25,7 @@ function stubFetch(handlers: {
   technicalModels?: (url: string, init: RequestInit) => Response;
   technicalModelVersions?: (url: string, init: RequestInit) => Response;
   derive?: (url: string, init: RequestInit) => Response;
+  publish?: (url: string, init: RequestInit) => Response;
   organizationModels?: (url: string, init: RequestInit) => Response;
   organizationModelVersions?: (url: string, init: RequestInit) => Response;
   auditRpc?: (init: RequestInit) => Response;
@@ -49,6 +50,12 @@ function stubFetch(handlers: {
         handlers.derive
       ) {
         return handlers.derive(url, init);
+      }
+      if (
+        url.startsWith(`${env.SUPABASE_URL}/rest/v1/rpc/publish_organization_model_version`) &&
+        handlers.publish
+      ) {
+        return handlers.publish(url, init);
       }
       if (
         url.startsWith(`${env.SUPABASE_URL}/rest/v1/organization_memberships`) &&
@@ -103,6 +110,7 @@ const organizationModelRow = {
   technical_model_id: technicalModelId,
   name: "Inspeção Predial",
   current_draft_version_id: draftVersionId,
+  current_published_version_id: null,
   archived_at: null,
   created_at: "2026-09-14T00:00:00.000Z",
   updated_at: "2026-09-14T00:00:00.000Z"
@@ -126,6 +134,22 @@ const draftVersionRow = {
   updated_at: "2026-09-14T00:00:00.000Z",
   published_at: null,
   archived_at: null
+};
+
+const newDraftVersionId = "90000000-0000-0000-0000-000000000003";
+
+const publishedV1Row = {
+  ...draftVersionRow,
+  status: "published",
+  published_at: "2026-09-15T00:00:00.000Z"
+};
+
+const draftV2Row = {
+  ...draftVersionRow,
+  id: newDraftVersionId,
+  version_number: 2,
+  status: "draft",
+  updated_at: "2026-09-15T00:00:00.000Z"
 };
 
 describe("POST /api/v1/organization-models", () => {
@@ -888,5 +912,284 @@ describe("PATCH /api/v1/organization-models/:id/draft — Requirement & Compatib
       env
     );
     expect(res.status).toBe(422);
+  });
+});
+
+describe("POST /api/v1/organization-models/:id/publish", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("rejects anonymous requests", async () => {
+    const res = await app.request(
+      `/api/v1/organization-models/${organizationModelId}/publish?organizationId=${orgId}`,
+      { method: "POST" },
+      env
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it.each([
+    "coordinator",
+    "inspector",
+    "reviewer",
+    "technical_responsible",
+    "billing_admin",
+    "viewer"
+  ])("returns 403 when the caller is a %s (lacks organization_model.publish)", async (role) => {
+    stubFetch({ membership: membershipHandler(role) });
+    const res = await app.request(
+      `/api/v1/organization-models/${organizationModelId}/publish?organizationId=${orgId}`,
+      { method: "POST", headers: authHeaders },
+      env
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("returns 404 when there is no draft to publish", async () => {
+    stubFetch({
+      membership: membershipHandler("owner"),
+      organizationModelVersions: () => new Response(null, { status: 406 })
+    });
+    const res = await app.request(
+      `/api/v1/organization-models/${organizationModelId}/publish?organizationId=${orgId}`,
+      { method: "POST", headers: authHeaders },
+      env
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it.each(["owner", "admin", "template_manager"])(
+    "publishes a compatible draft as a %s: freezes v1, opens v2, records both audit events",
+    async (role) => {
+      let orgModelCallCount = 0;
+      let versionsCallCount = 0;
+      let capturedPublishPayload: Record<string, unknown> | undefined;
+      const capturedAudits: Record<string, unknown>[] = [];
+
+      stubFetch({
+        membership: membershipHandler(role),
+        technicalModelVersions: () =>
+          new Response(JSON.stringify({ requirements: [] }), { status: 200 }),
+        organizationModels: () => {
+          orgModelCallCount++;
+          if (orgModelCallCount === 1) {
+            // Fetched before publishing (for previousPublishedVersionId).
+            return new Response(JSON.stringify(organizationModelRow), { status: 200 });
+          }
+          // Fetched after publishing.
+          return new Response(
+            JSON.stringify({
+              ...organizationModelRow,
+              current_published_version_id: draftVersionId,
+              current_draft_version_id: newDraftVersionId
+            }),
+            { status: 200 }
+          );
+        },
+        organizationModelVersions: () => {
+          versionsCallCount++;
+          if (versionsCallCount === 1) {
+            // fetchDraftVersionRow: the draft about to be published.
+            return new Response(JSON.stringify(draftVersionRow), { status: 200 });
+          }
+          // fetchDraftVersionRow again, after publish: the new v2 draft.
+          return new Response(JSON.stringify(draftV2Row), { status: 200 });
+        },
+        publish: (_url, init) => {
+          capturedPublishPayload = JSON.parse(init.body as string);
+          return new Response(JSON.stringify(publishedV1Row), { status: 200 });
+        },
+        auditRpc: (init) => {
+          capturedAudits.push(JSON.parse(init.body as string));
+          return new Response(JSON.stringify({ id: "audit-event-x" }), { status: 200 });
+        }
+      });
+
+      const res = await app.request(
+        `/api/v1/organization-models/${organizationModelId}/publish?organizationId=${orgId}`,
+        { method: "POST", headers: authHeaders },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        organizationModel: { currentPublishedVersionId: string; currentDraftVersionId: string };
+        publishedVersion: { id: string; status: string; versionNumber: number };
+        draftVersion: { id: string; status: string; versionNumber: number };
+      };
+      expect(body.publishedVersion).toMatchObject({
+        id: draftVersionId,
+        status: "published",
+        versionNumber: 1
+      });
+      expect(body.draftVersion).toMatchObject({
+        id: newDraftVersionId,
+        status: "draft",
+        versionNumber: 2
+      });
+      expect(body.organizationModel).toMatchObject({
+        currentPublishedVersionId: draftVersionId,
+        currentDraftVersionId: newDraftVersionId
+      });
+
+      expect(capturedPublishPayload).toMatchObject({
+        p_organization_id: orgId,
+        p_organization_model_id: organizationModelId,
+        p_draft_version_id: draftVersionId,
+        p_expected_updated_at: draftVersionRow.updated_at,
+        p_compatibility_status: "compatible",
+        p_compatibility_violations: []
+      });
+
+      expect(capturedAudits).toHaveLength(2);
+      expect(capturedAudits[0]).toMatchObject({
+        p_action: "organization_model_version.published",
+        p_entity_type: "organization_model_version",
+        p_entity_id: draftVersionId,
+        p_metadata: {
+          versionNumber: 1,
+          compatibilityStatus: "compatible",
+          previousPublishedVersionId: null
+        }
+      });
+      expect(capturedAudits[1]).toMatchObject({
+        p_action: "organization_model_version.created",
+        p_entity_type: "organization_model_version",
+        p_entity_id: newDraftVersionId,
+        p_metadata: { versionNumber: 2, createdBy: "publish" }
+      });
+      // Never dump the full definition into the audit log.
+      expect(JSON.stringify(capturedAudits[0]?.p_metadata)).not.toContain("Cover");
+    }
+  );
+
+  it("THE GATE: blocks publishing an incompatible draft with a 422 and useful violations, never publishing partially", async () => {
+    const requiredAddress = {
+      requirementId: "req-address",
+      label: "Endereço do imóvel",
+      level: "required",
+      sourceReference: "Fixture/Test",
+      coveredBy: ["blk-does-not-exist"]
+    };
+    stubFetch({
+      membership: membershipHandler("owner"),
+      technicalModelVersions: () =>
+        new Response(JSON.stringify({ requirements: [requiredAddress] }), { status: 200 }),
+      organizationModelVersions: () =>
+        new Response(JSON.stringify(draftVersionRow), { status: 200 }),
+      organizationModels: () => new Response(JSON.stringify(organizationModelRow), { status: 200 }),
+      publish: () => {
+        throw new Error("must not reach the publish RPC when the draft is incompatible");
+      }
+    });
+
+    const res = await app.request(
+      `/api/v1/organization-models/${organizationModelId}/publish?organizationId=${orgId}`,
+      { method: "POST", headers: authHeaders },
+      env
+    );
+
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { errors: Array<{ path: string; message: string }> };
+    expect(body.errors).toEqual([{ path: "req-address", message: requiredAddress.label }]);
+  });
+
+  it("returns 409 when the RPC reports the draft is no longer a draft (duplicate/retried publish)", async () => {
+    stubFetch({
+      membership: membershipHandler("owner"),
+      technicalModelVersions: () =>
+        new Response(JSON.stringify({ requirements: [] }), { status: 200 }),
+      organizationModelVersions: () =>
+        new Response(JSON.stringify(draftVersionRow), { status: 200 }),
+      organizationModels: () => new Response(JSON.stringify(organizationModelRow), { status: 200 }),
+      publish: () =>
+        new Response(
+          JSON.stringify({ code: "55000", message: "organization model version is not a draft" }),
+          { status: 400 }
+        )
+    });
+
+    const res = await app.request(
+      `/api/v1/organization-models/${organizationModelId}/publish?organizationId=${orgId}`,
+      { method: "POST", headers: authHeaders },
+      env
+    );
+
+    expect(res.status).toBe(409);
+  });
+
+  it("returns 409 when the draft was modified concurrently (stale compatibility recompute)", async () => {
+    stubFetch({
+      membership: membershipHandler("owner"),
+      technicalModelVersions: () =>
+        new Response(JSON.stringify({ requirements: [] }), { status: 200 }),
+      organizationModelVersions: () =>
+        new Response(JSON.stringify(draftVersionRow), { status: 200 }),
+      organizationModels: () => new Response(JSON.stringify(organizationModelRow), { status: 200 }),
+      publish: () =>
+        new Response(
+          JSON.stringify({
+            code: "40001",
+            message: "organization model version was modified concurrently"
+          }),
+          { status: 400 }
+        )
+    });
+
+    const res = await app.request(
+      `/api/v1/organization-models/${organizationModelId}/publish?organizationId=${orgId}`,
+      { method: "POST", headers: authHeaders },
+      env
+    );
+
+    expect(res.status).toBe(409);
+  });
+});
+
+describe("GET /api/v1/organization-models/:id/published", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("rejects anonymous requests", async () => {
+    const res = await app.request(
+      `/api/v1/organization-models/${organizationModelId}/published?organizationId=${orgId}`,
+      {},
+      env
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 404 when the model has never been published", async () => {
+    stubFetch({
+      membership: membershipHandler("owner"),
+      organizationModels: () => new Response(JSON.stringify(organizationModelRow), { status: 200 })
+    });
+    const res = await app.request(
+      `/api/v1/organization-models/${organizationModelId}/published?organizationId=${orgId}`,
+      { headers: authHeaders },
+      env
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("returns the published version by its explicit currentPublishedVersionId (never the latest row by timestamp)", async () => {
+    stubFetch({
+      membership: membershipHandler("viewer"),
+      organizationModels: () =>
+        new Response(
+          JSON.stringify({ ...organizationModelRow, current_published_version_id: draftVersionId }),
+          { status: 200 }
+        ),
+      organizationModelVersions: (url) => {
+        expect(url).toContain(`id=eq.${draftVersionId}`);
+        return new Response(JSON.stringify(publishedV1Row), { status: 200 });
+      }
+    });
+    const res = await app.request(
+      `/api/v1/organization-models/${organizationModelId}/published?organizationId=${orgId}`,
+      { headers: authHeaders },
+      env
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({ id: draftVersionId, status: "published" });
   });
 });

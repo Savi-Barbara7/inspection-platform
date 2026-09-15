@@ -29,3 +29,13 @@ export function notFoundError(requestId: string, title = "Not found") {
     errors: []
   };
 }
+
+export function conflictError(requestId: string, title: string) {
+  return {
+    type: "conflict",
+    title,
+    status: 409,
+    requestId,
+    errors: []
+  };
+}

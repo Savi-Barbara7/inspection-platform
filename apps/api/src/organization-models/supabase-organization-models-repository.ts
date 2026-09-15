@@ -10,6 +10,9 @@ import type {
   UpdateOrganizationModelVersionInput
 } from "@inspection-platform/domain/organization-models";
 import {
+  OrganizationModelIncompatibleError,
+  OrganizationModelVersionConflictError,
+  OrganizationModelVersionNotDraftError,
   UnknownRequirementIdError,
   UnpublishedTechnicalModelVersionError
 } from "@inspection-platform/domain/organization-models";
@@ -21,6 +24,7 @@ type OrganizationModelRow = {
   technical_model_id: string;
   name: string;
   current_draft_version_id: string | null;
+  current_published_version_id: string | null;
   archived_at: string | null;
   created_at: string;
   updated_at: string;
@@ -53,6 +57,7 @@ function toOrganizationModel(row: OrganizationModelRow): OrganizationModel {
     technicalModelId: row.technical_model_id,
     name: row.name,
     currentDraftVersionId: row.current_draft_version_id,
+    currentPublishedVersionId: row.current_published_version_id,
     archivedAt: row.archived_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at
@@ -105,6 +110,22 @@ export function createSupabaseOrganizationModelsRepository(
     };
   }
 
+  async function fetchOrganizationModelRow(
+    authToken: string,
+    organizationId: string,
+    organizationModelId: string
+  ): Promise<OrganizationModelRow | null> {
+    const response = await fetch(
+      `${supabaseUrl}/rest/v1/organization_models?id=eq.${organizationModelId}&organization_id=eq.${organizationId}&select=*`,
+      { headers: headers(authToken, { Accept: "application/vnd.pgrst.object+json" }) }
+    );
+    if (response.status === 406 || response.status === 404) return null;
+    if (!response.ok) {
+      throw new Error(`get organization model failed with status ${response.status}`);
+    }
+    return (await response.json()) as OrganizationModelRow;
+  }
+
   async function fetchDraftVersionRow(
     authToken: string,
     organizationId: string,
@@ -117,6 +138,22 @@ export function createSupabaseOrganizationModelsRepository(
     if (response.status === 406 || response.status === 404) return null;
     if (!response.ok) {
       throw new Error(`get draft version failed with status ${response.status}`);
+    }
+    return (await response.json()) as OrganizationModelVersionRow;
+  }
+
+  async function fetchVersionById(
+    authToken: string,
+    organizationId: string,
+    versionId: string
+  ): Promise<OrganizationModelVersionRow | null> {
+    const response = await fetch(
+      `${supabaseUrl}/rest/v1/organization_model_versions?id=eq.${versionId}&organization_id=eq.${organizationId}&select=*`,
+      { headers: headers(authToken, { Accept: "application/vnd.pgrst.object+json" }) }
+    );
+    if (response.status === 406 || response.status === 404) return null;
+    if (!response.ok) {
+      throw new Error(`get organization model version failed with status ${response.status}`);
     }
     return (await response.json()) as OrganizationModelVersionRow;
   }
@@ -215,15 +252,8 @@ export function createSupabaseOrganizationModelsRepository(
     },
 
     async getById(authToken, organizationId, id) {
-      const response = await fetch(
-        `${supabaseUrl}/rest/v1/organization_models?id=eq.${id}&organization_id=eq.${organizationId}&select=*`,
-        { headers: headers(authToken, { Accept: "application/vnd.pgrst.object+json" }) }
-      );
-      if (response.status === 406 || response.status === 404) return null;
-      if (!response.ok) {
-        throw new Error(`get organization model failed with status ${response.status}`);
-      }
-      return toOrganizationModel((await response.json()) as OrganizationModelRow);
+      const row = await fetchOrganizationModelRow(authToken, organizationId, id);
+      return row ? toOrganizationModel(row) : null;
     },
 
     async update(authToken, organizationId, id, patch: UpdateOrganizationModelInput) {
@@ -331,6 +361,101 @@ export function createSupabaseOrganizationModelsRepository(
         throw new Error(`update draft version failed with status ${response.status}`);
       }
       return toOrganizationModelVersion((await response.json()) as OrganizationModelVersionRow);
+    },
+
+    async getPublishedVersion(authToken, organizationId, organizationModelId) {
+      const model = await fetchOrganizationModelRow(authToken, organizationId, organizationModelId);
+      if (!model || !model.current_published_version_id) return null;
+      const row = await fetchVersionById(
+        authToken,
+        organizationId,
+        model.current_published_version_id
+      );
+      return row ? toOrganizationModelVersion(row) : null;
+    },
+
+    async publish(authToken, organizationId, organizationModelId) {
+      const draft = await fetchDraftVersionRow(authToken, organizationId, organizationModelId);
+      if (!draft) return null;
+
+      const modelBefore = await fetchOrganizationModelRow(
+        authToken,
+        organizationId,
+        organizationModelId
+      );
+      const previousPublishedVersionId = modelBefore?.current_published_version_id ?? null;
+
+      // Never trusts the persisted compatibility_status (Task 12
+      // section 6/7): recomputed here, from the live draft row just
+      // read, immediately before attempting the publish transaction.
+      const requirements = await fetchRequirements(authToken, draft.technical_model_version_id);
+      const compatibility = evaluateCompatibility(
+        requirements,
+        draft.definition,
+        draft.requirement_overrides
+      );
+      if (compatibility.status === "incompatible") {
+        throw new OrganizationModelIncompatibleError(compatibility.violations);
+      }
+
+      const response = await fetch(
+        `${supabaseUrl}/rest/v1/rpc/publish_organization_model_version`,
+        {
+          method: "POST",
+          headers: headers(authToken, { Accept: "application/vnd.pgrst.object+json" }),
+          body: JSON.stringify({
+            p_organization_id: organizationId,
+            p_organization_model_id: organizationModelId,
+            p_draft_version_id: draft.id,
+            // Optimistic check: if the draft changed between the reads
+            // above and the RPC acquiring its row lock, the compatibility
+            // just computed would be stale for whatever is actually about
+            // to be published (Task 12 section 13) -- the RPC rejects the
+            // call in that case rather than publishing based on stale data.
+            p_expected_updated_at: draft.updated_at,
+            p_compatibility_status: compatibility.status,
+            p_compatibility_violations: compatibility.violations
+          })
+        }
+      );
+
+      if (!response.ok) {
+        const body: unknown = await response.json().catch(() => null);
+        const code =
+          typeof body === "object" && body !== null ? (body as { code?: string }).code : null;
+        if (code === "55000") {
+          throw new OrganizationModelVersionNotDraftError(draft.id);
+        }
+        if (code === "40001") {
+          throw new OrganizationModelVersionConflictError(draft.id);
+        }
+        if (code === "23514") {
+          throw new OrganizationModelIncompatibleError(compatibility.violations);
+        }
+        const message =
+          typeof body === "object" && body !== null ? (body as { message?: string }).message : null;
+        throw new Error(
+          `publish_organization_model_version failed with status ${response.status}: ${message ?? ""}`
+        );
+      }
+
+      const publishedRow = (await response.json()) as OrganizationModelVersionRow;
+      const [modelAfter, newDraftRow] = await Promise.all([
+        fetchOrganizationModelRow(authToken, organizationId, organizationModelId),
+        fetchDraftVersionRow(authToken, organizationId, organizationModelId)
+      ]);
+      if (!modelAfter || !newDraftRow) {
+        throw new Error(
+          "publish succeeded but the follow-up reads could not find the expected rows"
+        );
+      }
+
+      return {
+        organizationModel: toOrganizationModel(modelAfter),
+        publishedVersion: toOrganizationModelVersion(publishedRow),
+        newDraftVersion: toOrganizationModelVersion(newDraftRow),
+        previousPublishedVersionId
+      };
     }
   };
 }
