@@ -16,14 +16,9 @@ This file is auto-loaded by Claude Code at session start. `AGENTS.md` (the proje
 
 Read the task specification, the affected domain docs, and any relevant ADRs before editing. Compare documentation against the actual current code/migrations/tests before trusting either — they can drift.
 
-## Known gaps as of Task 15 (do not assume these exist)
+## Known gaps and open follow-ups
 
-- No `job.read` capability — every job-read route currently gates on `job.edit`.
-- No `technical_professionals`, `projects`, or `inspection_events` tables — these are catalog-only `SourceType`s in `packages/domain/src/data-sources` with no backing table (a documented, deliberate gap, not an oversight).
-- No `CustomFieldDefinition` — `CustomData` is a small fixed set of hardcoded fields.
-- No generic server-side `SourceResolver` — only a small, explicit Customer/Site field-to-column map used for best-effort initial capture at job creation.
-- No members/invites API, no `UserProfile`, no `OrganizationModelVersion` history/diff endpoint, no source-assignment update/relink, no Organization branding contract, no `Asset` SourceType.
-- See `docs/product/CODEX_REVIEW_RESPONSE_TASK15.md` for the full, evidence-checked list and the proposed "Task 15.5" scope.
+This file never lists specific gaps by name — that list changes after every task and would go stale here immediately. The current, maintained list of confirmed gaps, their proposed owners, and pending architectural decisions lives in `docs/product/ROADMAP_TASKS_V2.md` (search for the most recent decimal-numbered milestone, e.g. `Task 15.5`) and in `docs/product/CODEX_REVIEW_RESPONSE_TASK15.md`. Always check those before assuming a capability, table, or endpoint exists or doesn't.
 
 ## Execution rules
 
@@ -39,12 +34,16 @@ Read the task specification, the affected domain docs, and any relevant ADRs bef
 
 ## Definition of Done
 
+Always:
+
 - Scope matches the task specification; no unrelated modules changed silently.
-- Authorization and RLS are covered (positive and negative/cross-tenant tests).
-- Migrations are reproducible from a clean `supabase db reset` and pass `supabase test db`.
-- Positive and negative tests pass (domain unit tests, API tests, pgTAP).
-- Real end-to-end verification was performed via `wrangler dev` + local Supabase (not mocks alone) before declaring the task done.
 - Lint, typecheck, test, and build all pass locally before pushing.
-- Documentation is updated in the same change (`docs/domain/`, `docs/database/SCHEMA.md`, `docs/architecture/MODULES.md`, roadmap "Entregue" entry).
+- Documentation is updated in the same change (relevant `docs/domain/` file, roadmap "Entregue" entry, and `docs/database/SCHEMA.md`/`docs/architecture/MODULES.md` when the task touches schema or module boundaries).
 - Residual risks and debt are stated explicitly (in the doc and/or the roadmap entry), never left implicit.
 - The complete diff was reviewed before commit.
+
+Conditional on what the task actually touches — do not demand a gate that doesn't apply, but do not skip one that does:
+
+- If the task adds/changes a database table, RLS policy, or Postgres function: migrations are reproducible from a clean `supabase db reset`, and `supabase test db` (pgTAP) passes with new tests covering the change, including cross-tenant cases.
+- If the task adds/changes an HTTP-facing capability: authorization is covered by positive and negative tests, and a real end-to-end check was run via `wrangler dev` + local Supabase (not mocks alone) before declaring it done.
+- If the task is documentation/governance/process only (no code, migration, or schema change): the gates above about migrations, pgTAP, and `wrangler dev` end-to-end verification do not apply — say so explicitly instead of fabricating evidence for a check that was never relevant.

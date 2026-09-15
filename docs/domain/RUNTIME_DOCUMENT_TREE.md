@@ -107,6 +107,19 @@ dentro de outro (ex.: "Edificações" → "Ambientes") — respeitando o mesmo
 `MAX_SECTION_DEPTH` que toda seção já respeita. Não existe um limite de
 aninhamento separado para grupos repetíveis.
 
+> **Correção pós-Task 15 (revisão de integridade):** o parágrafo acima
+> descreve o caminho feliz testado (materialização + um item por nível).
+> Uma revisão posterior encontrou que `duplicate_group_item()` reencontra
+> o nó container de um item aninhado por uma busca ambígua (`definition_id`
+> sem escopo por `group_item_id`), podendo clonar a subárvore errada
+> quando existe mais de um item externo, e que `add_group_item()` nunca
+> valida que o container informado pertence de fato ao
+> `parent_group_item_id` informado. Nesting também só suporta um único
+> pai por item hoje (sem suporte a múltiplos pais). Ver Task 15.5A em
+> `docs/product/ROADMAP_TASKS_V2.md` — nenhum desses bugs foi corrigido
+> ainda; esta nota existe para que este documento não implique uma
+> garantia que o código não cumpre.
+
 ## GroupItem como DataBinding source (fechando o débito da Task 13)
 
 A Task 13 deixou o catálogo de campos de `GroupItem` deliberadamente vazio
