@@ -206,3 +206,122 @@ export interface GroupItem {
 export function reorderIds(orderedIds: readonly string[], id: string, newIndex: number): string[] {
   return reorder(orderedIds, id, newIndex, (x) => x);
 }
+
+/**
+ * The Document Tree read shape (Task 15 section 45): id/definitionId/
+ * type/state/children, assembled from relational persistence
+ * (RuntimeNode/GroupItem rows), never stored as one JSON blob.
+ * Deliberately carries no `title`/label -- those live only in the
+ * job's own frozen OrganizationModelVersion.definition, which a client
+ * fetches once and caches (it is immutable for the life of the job);
+ * duplicating presentational text onto every node on every read would
+ * cost far more than the one-time definition fetch, and is exactly the
+ * kind of unnecessary-blob-loading Task 15 section 46 warns against.
+ */
+export interface DocumentTreeNode {
+  id: string;
+  definitionId: string;
+  definitionKind: RuntimeNodeDefinitionKind;
+  blockType: string | null;
+  state: RuntimeNodeState;
+  isRepeatableContainer: boolean;
+  position: number;
+  children: DocumentTreeNode[];
+  /** Present only when isRepeatableContainer is true. */
+  groupItems?: DocumentTreeGroupItem[];
+}
+
+export interface DocumentTreeGroupItem {
+  id: string;
+  position: number;
+  state: GroupItemState;
+  parentGroupItemId: string | null;
+  children: DocumentTreeNode[];
+}
+
+export interface BuildDocumentTreeOptions {
+  /** Default false: an archived GroupItem (and its own subtree) is left out of the live structure, never physically dropped from storage. */
+  includeArchived?: boolean;
+}
+
+function nodeToTreeNode(
+  node: RuntimeNode,
+  nodes: readonly RuntimeNode[],
+  groupItems: readonly GroupItem[],
+  enclosingGroupItemId: string | null,
+  includeArchived: boolean
+): DocumentTreeNode {
+  const base: DocumentTreeNode = {
+    id: node.id,
+    definitionId: node.definitionId,
+    definitionKind: node.definitionKind,
+    blockType: node.blockType,
+    state: node.state,
+    isRepeatableContainer: node.isRepeatableContainer,
+    position: node.position,
+    children: []
+  };
+
+  if (node.isRepeatableContainer) {
+    base.groupItems = groupItems
+      .filter(
+        (gi) =>
+          gi.definitionSectionId === node.definitionId &&
+          gi.parentGroupItemId === enclosingGroupItemId &&
+          (includeArchived || gi.state !== "archived")
+      )
+      .sort((a, b) => a.position - b.position)
+      .map((gi) => groupItemToTreeNode(gi, nodes, groupItems, includeArchived));
+    return base;
+  }
+
+  base.children = nodes
+    .filter((n) => n.parentNodeId === node.id && n.groupItemId === enclosingGroupItemId)
+    .sort((a, b) => a.position - b.position)
+    .map((n) => nodeToTreeNode(n, nodes, groupItems, enclosingGroupItemId, includeArchived));
+  return base;
+}
+
+function groupItemToTreeNode(
+  groupItem: GroupItem,
+  nodes: readonly RuntimeNode[],
+  groupItems: readonly GroupItem[],
+  includeArchived: boolean
+): DocumentTreeGroupItem {
+  const containerNode = nodes.find(
+    (n) => n.definitionId === groupItem.definitionSectionId && n.isRepeatableContainer
+  );
+  const children = containerNode
+    ? nodes
+        .filter((n) => n.parentNodeId === containerNode.id && n.groupItemId === groupItem.id)
+        .sort((a, b) => a.position - b.position)
+        .map((n) => nodeToTreeNode(n, nodes, groupItems, groupItem.id, includeArchived))
+    : [];
+  return {
+    id: groupItem.id,
+    position: groupItem.position,
+    state: groupItem.state,
+    parentGroupItemId: groupItem.parentGroupItemId,
+    children
+  };
+}
+
+/**
+ * Assembles the full Document Tree from flat RuntimeNode/GroupItem
+ * arrays (as read from Postgres) -- pure and DB-free, so the hierarchy/
+ * ordering/nested-group-context logic is unit-testable without ever
+ * touching a real database. `enclosingGroupItemId` threads through the
+ * recursion so a nested RepeatableGroup's own items resolve against
+ * the correct (possibly nested) context, never a global lookup.
+ */
+export function buildDocumentTree(
+  nodes: readonly RuntimeNode[],
+  groupItems: readonly GroupItem[],
+  options: BuildDocumentTreeOptions = {}
+): DocumentTreeNode[] {
+  const includeArchived = options.includeArchived ?? false;
+  return nodes
+    .filter((n) => n.parentNodeId === null && n.groupItemId === null)
+    .sort((a, b) => a.position - b.position)
+    .map((n) => nodeToTreeNode(n, nodes, groupItems, null, includeArchived));
+}

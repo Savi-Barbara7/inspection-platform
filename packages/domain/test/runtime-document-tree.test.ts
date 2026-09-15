@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { DocumentDefinition, Section } from "../src/templates/blocks";
 import {
+  buildDocumentTree,
   buildGroupItemMaterializationPlan,
   buildMaterializationPlan,
   findSectionById,
@@ -10,8 +11,44 @@ import {
   resolveRepeatableSection,
   RUNTIME_NODE_STATES,
   SectionNotFoundInDefinitionError,
-  SectionNotRepeatableError
+  SectionNotRepeatableError,
+  type GroupItem,
+  type RuntimeNode
 } from "../src/runtime-document-tree";
+
+function node(
+  overrides: Partial<RuntimeNode> & Pick<RuntimeNode, "id" | "definitionId">
+): RuntimeNode {
+  return {
+    organizationId: "org-1",
+    technicalJobId: "job-1",
+    definitionKind: "block",
+    blockType: "TechnicalInformation",
+    parentNodeId: null,
+    groupItemId: null,
+    isRepeatableContainer: false,
+    position: 0,
+    state: "visible",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    ...overrides
+  };
+}
+
+function groupItem(
+  overrides: Partial<GroupItem> & Pick<GroupItem, "id" | "definitionSectionId">
+): GroupItem {
+  return {
+    organizationId: "org-1",
+    technicalJobId: "job-1",
+    parentGroupItemId: null,
+    position: 0,
+    state: "active",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    ...overrides
+  };
+}
 
 function plainDefinition(): DocumentDefinition {
   return {
@@ -191,6 +228,181 @@ describe("7. reorder stability: ids never change, only position", () => {
 describe("runtime node states are explicit — hidden/conditional_inactive are first-class, never a silent drop", () => {
   it("includes visible, hidden, and conditional_inactive", () => {
     expect(RUNTIME_NODE_STATES).toEqual(["visible", "hidden", "conditional_inactive"]);
+  });
+});
+
+describe("buildDocumentTree() — pure assembly from flat RuntimeNode/GroupItem rows", () => {
+  it("assembles a plain (non-repeatable) hierarchy in position order", () => {
+    const nodes: RuntimeNode[] = [
+      node({
+        id: "n-sec-1",
+        definitionId: "sec-1",
+        definitionKind: "section",
+        blockType: null,
+        position: 0
+      }),
+      node({ id: "n-blk-1", definitionId: "blk-1", parentNodeId: "n-sec-1", position: 0 }),
+      node({ id: "n-blk-2", definitionId: "blk-2", parentNodeId: "n-sec-1", position: 1 }),
+      node({
+        id: "n-sec-2",
+        definitionId: "sec-2",
+        definitionKind: "section",
+        blockType: null,
+        position: 1
+      })
+    ];
+    const tree = buildDocumentTree(nodes, []);
+    expect(tree.map((n) => n.definitionId)).toEqual(["sec-1", "sec-2"]);
+    expect(tree[0]!.children.map((n) => n.definitionId)).toEqual(["blk-1", "blk-2"]);
+    expect(tree[1]!.children).toEqual([]);
+  });
+
+  it("22/23. a RepeatableGroup container carries its own GroupItems, each with an independent subtree even though every item shares the same definitionId children", () => {
+    const nodes: RuntimeNode[] = [
+      node({
+        id: "n-group",
+        definitionId: "sec-group",
+        definitionKind: "section",
+        blockType: null,
+        isRepeatableContainer: true,
+        position: 0
+      }),
+      node({
+        id: "n-a-detail",
+        definitionId: "sec-detail",
+        definitionKind: "section",
+        blockType: null,
+        parentNodeId: "n-group",
+        groupItemId: "gi-a",
+        position: 0
+      }),
+      node({
+        id: "n-a-field",
+        definitionId: "blk-field",
+        parentNodeId: "n-a-detail",
+        groupItemId: "gi-a",
+        position: 0
+      }),
+      node({
+        id: "n-b-detail",
+        definitionId: "sec-detail",
+        definitionKind: "section",
+        blockType: null,
+        parentNodeId: "n-group",
+        groupItemId: "gi-b",
+        position: 0
+      }),
+      node({
+        id: "n-b-field",
+        definitionId: "blk-field",
+        parentNodeId: "n-b-detail",
+        groupItemId: "gi-b",
+        position: 0
+      })
+    ];
+    const groupItems: GroupItem[] = [
+      groupItem({ id: "gi-a", definitionSectionId: "sec-group", position: 0 }),
+      groupItem({ id: "gi-b", definitionSectionId: "sec-group", position: 1 })
+    ];
+    const tree = buildDocumentTree(nodes, groupItems);
+    expect(tree).toHaveLength(1);
+    expect(tree[0]!.isRepeatableContainer).toBe(true);
+    expect(tree[0]!.children).toEqual([]);
+    expect(tree[0]!.groupItems).toHaveLength(2);
+    expect(tree[0]!.groupItems!.map((gi) => gi.id)).toEqual(["gi-a", "gi-b"]);
+    // Same definitionId ("sec-detail"/"blk-field") on both sides, but the
+    // actual runtime node ids returned are distinct per GroupItem.
+    expect(tree[0]!.groupItems![0]!.children[0]!.id).toBe("n-a-detail");
+    expect(tree[0]!.groupItems![1]!.children[0]!.id).toBe("n-b-detail");
+    expect(tree[0]!.groupItems![0]!.children[0]!.children[0]!.id).toBe("n-a-field");
+    expect(tree[0]!.groupItems![1]!.children[0]!.children[0]!.id).toBe("n-b-field");
+  });
+
+  it("nested RepeatableGroups resolve each level's items against the correct enclosing context", () => {
+    const nodes: RuntimeNode[] = [
+      node({
+        id: "n-outer",
+        definitionId: "sec-outer",
+        definitionKind: "section",
+        blockType: null,
+        isRepeatableContainer: true,
+        position: 0
+      }),
+      node({
+        id: "n-inner-container",
+        definitionId: "sec-inner",
+        definitionKind: "section",
+        blockType: null,
+        isRepeatableContainer: true,
+        parentNodeId: "n-outer",
+        groupItemId: "gi-outer-1",
+        position: 0
+      }),
+      node({
+        id: "n-inner-detail",
+        definitionId: "sec-inner-detail",
+        definitionKind: "section",
+        blockType: null,
+        parentNodeId: "n-inner-container",
+        groupItemId: "gi-inner-1",
+        position: 0
+      })
+    ];
+    const groupItems: GroupItem[] = [
+      groupItem({ id: "gi-outer-1", definitionSectionId: "sec-outer", position: 0 }),
+      groupItem({
+        id: "gi-inner-1",
+        definitionSectionId: "sec-inner",
+        parentGroupItemId: "gi-outer-1",
+        position: 0
+      })
+    ];
+    const tree = buildDocumentTree(nodes, groupItems);
+    const outerItem = tree[0]!.groupItems![0]!;
+    expect(outerItem.id).toBe("gi-outer-1");
+    const innerContainer = outerItem.children[0]!;
+    expect(innerContainer.isRepeatableContainer).toBe(true);
+    expect(innerContainer.groupItems).toHaveLength(1);
+    expect(innerContainer.groupItems![0]!.id).toBe("gi-inner-1");
+    expect(innerContainer.groupItems![0]!.children[0]!.id).toBe("n-inner-detail");
+  });
+
+  it("19. an archived GroupItem is excluded from the default tree but included with includeArchived:true — never physically dropped from the data", () => {
+    const nodes: RuntimeNode[] = [
+      node({
+        id: "n-group",
+        definitionId: "sec-group",
+        definitionKind: "section",
+        blockType: null,
+        isRepeatableContainer: true,
+        position: 0
+      })
+    ];
+    const groupItems: GroupItem[] = [
+      groupItem({ id: "gi-a", definitionSectionId: "sec-group", position: 0, state: "active" }),
+      groupItem({ id: "gi-b", definitionSectionId: "sec-group", position: 1, state: "archived" })
+    ];
+    const defaultTree = buildDocumentTree(nodes, groupItems);
+    expect(defaultTree[0]!.groupItems!.map((gi) => gi.id)).toEqual(["gi-a"]);
+
+    const fullTree = buildDocumentTree(nodes, groupItems, { includeArchived: true });
+    expect(fullTree[0]!.groupItems!.map((gi) => gi.id)).toEqual(["gi-a", "gi-b"]);
+  });
+
+  it("16. a conditional_inactive/hidden node still appears in the tree, never silently dropped", () => {
+    const nodes: RuntimeNode[] = [
+      node({
+        id: "n-sec",
+        definitionId: "sec-1",
+        definitionKind: "section",
+        blockType: null,
+        state: "conditional_inactive",
+        position: 0
+      })
+    ];
+    const tree = buildDocumentTree(nodes, []);
+    expect(tree).toHaveLength(1);
+    expect(tree[0]!.state).toBe("conditional_inactive");
   });
 });
 
