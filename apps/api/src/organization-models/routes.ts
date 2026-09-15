@@ -2,9 +2,12 @@ import { Hono } from "hono";
 import { z } from "zod";
 import {
   validateDocumentDefinition,
-  type DocumentDefinition
+  validateRequirementOverrides,
+  type DocumentDefinition,
+  type RequirementOverride
 } from "@inspection-platform/domain/templates";
 import {
+  UnknownRequirementIdError,
   UnpublishedTechnicalModelVersionError,
   type OrganizationModelsRepository
 } from "@inspection-platform/domain/organization-models";
@@ -56,11 +59,16 @@ const listOrganizationModelsQuerySchema = z.object({
 // (see Task 10 "não duplicar os 13 schemas do block engine dentro da
 // API"). This route only checks that `definition` is present as *some*
 // object; validateDocumentDefinition() is the actual gate.
+// Same rationale as `definition` above: only checks that
+// requirementOverrides is *some* array; validateRequirementOverrides()
+// (Task 11) is the actual gate, reused from the domain package rather
+// than redeclared here.
 const updateDraftVersionSchema = z
   .object({
     title: z.string().trim().min(1).max(200).optional(),
     description: z.string().trim().min(1).max(2000).nullable().optional(),
-    definition: z.unknown().optional()
+    definition: z.unknown().optional(),
+    requirementOverrides: z.unknown().optional()
   })
   .refine((data) => Object.keys(data).length > 0, { message: "at least one field is required" });
 
@@ -302,27 +310,63 @@ export function createOrganizationModelsRoutes(
         definition = validation.definition;
       }
 
+      // Same single-entry-point treatment for requirement overrides
+      // (Task 11) — shape validation only; whether each requirementId
+      // actually names a requirement on the source TechnicalModelVersion
+      // is checked by the repository, which has that registry in hand.
+      let requirementOverrides: RequirementOverride[] | undefined;
+      if (parsed.data.requirementOverrides !== undefined) {
+        const validation = validateRequirementOverrides(parsed.data.requirementOverrides);
+        if (!validation.valid) {
+          return c.json(
+            {
+              type: "validation_error",
+              title: "Invalid requirement overrides",
+              status: 422,
+              requestId: c.get("requestId"),
+              errors: validation.errors
+            },
+            422
+          );
+        }
+        requirementOverrides = validation.overrides;
+      }
+
       const authToken = c.get("authToken")!;
       const organizationId = c.req.query("organizationId")!;
       const organizationModelId = c.req.param("id");
 
-      const draft = await getRepository(c.env).updateDraftVersion(
-        authToken,
-        organizationId,
-        organizationModelId,
-        {
-          title: parsed.data.title,
-          description: parsed.data.description,
-          definition
+      let draft;
+      try {
+        draft = await getRepository(c.env).updateDraftVersion(
+          authToken,
+          organizationId,
+          organizationModelId,
+          {
+            title: parsed.data.title,
+            description: parsed.data.description,
+            definition,
+            requirementOverrides
+          }
+        );
+      } catch (err) {
+        if (err instanceof UnknownRequirementIdError) {
+          return c.json(
+            fieldValidationError(c.get("requestId"), "requirementOverrides", err.message),
+            422
+          );
         }
-      );
+        throw err;
+      }
       if (!draft) {
         return c.json(draftNotFoundError(c.get("requestId")), 404);
       }
 
       // Never the full definition -- only which top-level fields changed
       // and a lightweight shape summary, per Task 10's explicit "sem
-      // despejar definições gigantes no audit log".
+      // despejar definições gigantes no audit log". compatibilityStatus
+      // is a short string, safe to log directly (Task 11: makes a
+      // compatibility change visible in the trail, never silent).
       await recordAuditEventBestEffort(getAuditService(c.env), authToken, {
         organizationId,
         action: "organization_model_version.updated",
@@ -331,7 +375,9 @@ export function createOrganizationModelsRoutes(
         metadata: {
           organizationModelId,
           fieldsChanged: Object.keys(parsed.data),
-          ...(definition ? { sectionCount: definition.sections.length } : {})
+          ...(definition ? { sectionCount: definition.sections.length } : {}),
+          compatibilityStatus: draft.compatibilityStatus,
+          compatibilityViolationCount: draft.compatibilityViolations.length
         },
         requestId: c.get("requestId")
       });

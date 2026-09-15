@@ -1,4 +1,5 @@
-import type { DocumentDefinition } from "@inspection-platform/domain/templates";
+import type { DocumentDefinition, Requirement } from "@inspection-platform/domain/templates";
+import { evaluateCompatibility } from "@inspection-platform/domain/templates";
 import type {
   CreateOrganizationModelInput,
   ListOrganizationModelsQuery,
@@ -8,7 +9,10 @@ import type {
   UpdateOrganizationModelInput,
   UpdateOrganizationModelVersionInput
 } from "@inspection-platform/domain/organization-models";
-import { UnpublishedTechnicalModelVersionError } from "@inspection-platform/domain/organization-models";
+import {
+  UnknownRequirementIdError,
+  UnpublishedTechnicalModelVersionError
+} from "@inspection-platform/domain/organization-models";
 import { buildIlikeOrFilter } from "../lib/postgrest-filters";
 
 type OrganizationModelRow = {
@@ -33,6 +37,9 @@ type OrganizationModelVersionRow = {
   description: string | null;
   definition: DocumentDefinition;
   definition_schema_version: number;
+  requirement_overrides: OrganizationModelVersion["requirementOverrides"];
+  compatibility_status: string;
+  compatibility_violations: OrganizationModelVersion["compatibilityViolations"];
   created_at: string;
   updated_at: string;
   published_at: string | null;
@@ -64,6 +71,10 @@ function toOrganizationModelVersion(row: OrganizationModelVersionRow): Organizat
     description: row.description,
     definition: row.definition,
     definitionSchemaVersion: row.definition_schema_version,
+    requirementOverrides: row.requirement_overrides,
+    compatibilityStatus:
+      row.compatibility_status as OrganizationModelVersion["compatibilityStatus"],
+    compatibilityViolations: row.compatibility_violations,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     publishedAt: row.published_at,
@@ -108,6 +119,21 @@ export function createSupabaseOrganizationModelsRepository(
       throw new Error(`get draft version failed with status ${response.status}`);
     }
     return (await response.json()) as OrganizationModelVersionRow;
+  }
+
+  async function fetchRequirements(
+    authToken: string,
+    technicalModelVersionId: string
+  ): Promise<Requirement[]> {
+    const response = await fetch(
+      `${supabaseUrl}/rest/v1/technical_model_versions?id=eq.${technicalModelVersionId}&select=requirements`,
+      { headers: headers(authToken, { Accept: "application/vnd.pgrst.object+json" }) }
+    );
+    if (!response.ok) {
+      throw new Error(`get source requirements failed with status ${response.status}`);
+    }
+    const row = (await response.json()) as { requirements: Requirement[] };
+    return row.requirements;
   }
 
   return {
@@ -252,10 +278,42 @@ export function createSupabaseOrganizationModelsRepository(
       organizationModelId,
       patch: UpdateOrganizationModelVersionInput
     ) {
-      const body: Record<string, unknown> = {};
+      const current = await fetchDraftVersionRow(authToken, organizationId, organizationModelId);
+      if (!current) return null;
+
+      const effectiveDefinition = patch.definition ?? current.definition;
+      const effectiveOverrides = patch.requirementOverrides ?? current.requirement_overrides;
+
+      const requirements = await fetchRequirements(authToken, current.technical_model_version_id);
+
+      if (patch.requirementOverrides !== undefined) {
+        const knownIds = new Set(requirements.map((r) => r.requirementId));
+        for (const override of patch.requirementOverrides) {
+          if (!knownIds.has(override.requirementId)) {
+            throw new UnknownRequirementIdError(override.requirementId);
+          }
+        }
+      }
+
+      // Recomputed on every write, from the effective (possibly patched)
+      // definition/overrides — never trusts a client-supplied status
+      // (Task 11 gate: a required requirement's coverage going missing
+      // must never silently read back as "compatible").
+      const compatibility = evaluateCompatibility(
+        requirements,
+        effectiveDefinition,
+        effectiveOverrides
+      );
+
+      const body: Record<string, unknown> = {
+        compatibility_status: compatibility.status,
+        compatibility_violations: compatibility.violations
+      };
       if (patch.title !== undefined) body.title = patch.title;
       if (patch.description !== undefined) body.description = patch.description;
       if (patch.definition !== undefined) body.definition = patch.definition;
+      if (patch.requirementOverrides !== undefined)
+        body.requirement_overrides = patch.requirementOverrides;
 
       const response = await fetch(
         `${supabaseUrl}/rest/v1/organization_model_versions?organization_model_id=eq.${organizationModelId}&organization_id=eq.${organizationId}&status=eq.draft`,

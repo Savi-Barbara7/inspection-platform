@@ -23,6 +23,7 @@ function membershipHandler(role: string | null): (url: string, init: RequestInit
 function stubFetch(handlers: {
   membership?: (url: string, init: RequestInit) => Response;
   technicalModels?: (url: string, init: RequestInit) => Response;
+  technicalModelVersions?: (url: string, init: RequestInit) => Response;
   derive?: (url: string, init: RequestInit) => Response;
   organizationModels?: (url: string, init: RequestInit) => Response;
   organizationModelVersions?: (url: string, init: RequestInit) => Response;
@@ -66,6 +67,12 @@ function stubFetch(handlers: {
         handlers.organizationModels
       ) {
         return handlers.organizationModels(url, init);
+      }
+      if (
+        url.startsWith(`${env.SUPABASE_URL}/rest/v1/technical_model_versions`) &&
+        handlers.technicalModelVersions
+      ) {
+        return handlers.technicalModelVersions(url, init);
       }
       if (
         url.startsWith(`${env.SUPABASE_URL}/rest/v1/technical_models`) &&
@@ -112,6 +119,9 @@ const draftVersionRow = {
   description: null,
   definition: validDefinition,
   definition_schema_version: 1,
+  requirement_overrides: [],
+  compatibility_status: "compatible",
+  compatibility_violations: [],
   created_at: "2026-09-14T00:00:00.000Z",
   updated_at: "2026-09-14T00:00:00.000Z",
   published_at: null,
@@ -538,6 +548,8 @@ describe("PATCH /api/v1/organization-models/:id/draft", () => {
     let capturedAudit: Record<string, unknown> | undefined;
     stubFetch({
       membership: membershipHandler("template_manager"),
+      technicalModelVersions: () =>
+        new Response(JSON.stringify({ requirements: [] }), { status: 200 }),
       organizationModelVersions: (url, init) => {
         if (init.method === "PATCH") {
           capturedBody = JSON.parse(init.body as string);
@@ -545,7 +557,8 @@ describe("PATCH /api/v1/organization-models/:id/draft", () => {
             status: 200
           });
         }
-        throw new Error(`unexpected organization_model_versions call: ${url}`);
+        // The GET that fetches the current draft before recomputing compatibility.
+        return new Response(JSON.stringify(draftVersionRow), { status: 200 });
       },
       auditRpc: (init) => {
         capturedAudit = JSON.parse(init.body as string);
@@ -564,11 +577,20 @@ describe("PATCH /api/v1/organization-models/:id/draft", () => {
     );
 
     expect(res.status).toBe(200);
-    expect(capturedBody).toMatchObject({ definition: validDefinition });
+    expect(capturedBody).toMatchObject({
+      definition: validDefinition,
+      compatibility_status: "compatible",
+      compatibility_violations: []
+    });
     expect(capturedAudit).toMatchObject({
       p_action: "organization_model_version.updated",
       p_entity_type: "organization_model_version",
-      p_metadata: { fieldsChanged: ["definition"], sectionCount: 1 }
+      p_metadata: {
+        fieldsChanged: ["definition"],
+        sectionCount: 1,
+        compatibilityStatus: "compatible",
+        compatibilityViolationCount: 0
+      }
     });
     // Never dump the full definition into the audit log — only a count.
     expect(JSON.stringify(capturedAudit?.p_metadata)).not.toContain("Cover");
@@ -671,5 +693,200 @@ describe("PATCH /api/v1/organization-models/:id/draft", () => {
       env
     );
     expect(res.status).toBe(404);
+  });
+});
+
+describe("PATCH /api/v1/organization-models/:id/draft — Requirement & Compatibility Guard (Task 11)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const requiredAddress = {
+    requirementId: "req-address",
+    label: "Endereço do imóvel",
+    level: "required",
+    sourceReference: "Fixture/Test",
+    coveredBy: ["blk-1111"]
+  };
+
+  it("THE GATE: removing a required requirement's coverage never silently reports compatible", async () => {
+    let capturedBody: Record<string, unknown> | undefined;
+    let capturedAudit: Record<string, unknown> | undefined;
+    // The new definition no longer contains blk-1111, which req-address depends on.
+    const newDefinition = {
+      schemaVersion: 1,
+      sections: [
+        { id: "sec-2222", title: "Outra seção", blocks: [{ id: "blk-2222", type: "PageBreak" }] }
+      ]
+    };
+
+    stubFetch({
+      membership: membershipHandler("owner"),
+      technicalModelVersions: () =>
+        new Response(JSON.stringify({ requirements: [requiredAddress] }), { status: 200 }),
+      organizationModelVersions: (_url, init) => {
+        if (init.method === "PATCH") {
+          const parsedBody = JSON.parse(init.body as string) as Record<string, unknown>;
+          capturedBody = parsedBody;
+          return new Response(
+            JSON.stringify({
+              ...draftVersionRow,
+              definition: newDefinition,
+              compatibility_status: parsedBody.compatibility_status,
+              compatibility_violations: parsedBody.compatibility_violations
+            }),
+            { status: 200 }
+          );
+        }
+        return new Response(JSON.stringify(draftVersionRow), { status: 200 });
+      },
+      auditRpc: (init) => {
+        capturedAudit = JSON.parse(init.body as string);
+        return new Response(JSON.stringify({ id: "audit-event-5" }), { status: 200 });
+      }
+    });
+
+    const res = await app.request(
+      `/api/v1/organization-models/${organizationModelId}/draft?organizationId=${orgId}`,
+      {
+        method: "PATCH",
+        headers: authHeaders,
+        body: JSON.stringify({ definition: newDefinition })
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      compatibilityStatus: string;
+      compatibilityViolations: unknown[];
+    };
+    expect(capturedBody).toMatchObject({ compatibility_status: "incompatible" });
+    expect(body.compatibilityStatus).toBe("incompatible");
+    expect(body.compatibilityViolations).toEqual([
+      { requirementId: "req-address", label: requiredAddress.label, missingIds: ["blk-1111"] }
+    ]);
+    // The compatibility change is visible in the audit trail — never silent.
+    expect(capturedAudit).toMatchObject({
+      p_metadata: { compatibilityStatus: "incompatible", compatibilityViolationCount: 1 }
+    });
+  });
+
+  it("recording a requirementOverride with a reason clears the violation", async () => {
+    let capturedBody: Record<string, unknown> | undefined;
+    const overrides = [
+      { requirementId: "req-address", reason: "Endereço confidencial a pedido do cliente" }
+    ];
+    const draftMissingAddressBlock = {
+      ...draftVersionRow,
+      definition: {
+        schemaVersion: 1,
+        sections: [
+          { id: "sec-2222", title: "Outra seção", blocks: [{ id: "blk-2222", type: "PageBreak" }] }
+        ]
+      },
+      compatibility_status: "incompatible",
+      compatibility_violations: [
+        { requirementId: "req-address", label: requiredAddress.label, missingIds: ["blk-1111"] }
+      ]
+    };
+
+    stubFetch({
+      membership: membershipHandler("owner"),
+      technicalModelVersions: () =>
+        new Response(JSON.stringify({ requirements: [requiredAddress] }), { status: 200 }),
+      organizationModelVersions: (_url, init) => {
+        if (init.method === "PATCH") {
+          capturedBody = JSON.parse(init.body as string);
+          return new Response(
+            JSON.stringify({
+              ...draftMissingAddressBlock,
+              requirement_overrides: overrides,
+              compatibility_status: "compatible",
+              compatibility_violations: []
+            }),
+            { status: 200 }
+          );
+        }
+        return new Response(JSON.stringify(draftMissingAddressBlock), { status: 200 });
+      }
+    });
+
+    const res = await app.request(
+      `/api/v1/organization-models/${organizationModelId}/draft?organizationId=${orgId}`,
+      {
+        method: "PATCH",
+        headers: authHeaders,
+        body: JSON.stringify({ requirementOverrides: overrides })
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { compatibilityStatus: string };
+    expect(capturedBody).toMatchObject({
+      requirement_overrides: overrides,
+      compatibility_status: "compatible",
+      compatibility_violations: []
+    });
+    expect(body.compatibilityStatus).toBe("compatible");
+  });
+
+  it("rejects an override naming a requirementId that doesn't exist on the source model", async () => {
+    stubFetch({
+      membership: membershipHandler("owner"),
+      technicalModelVersions: () =>
+        new Response(JSON.stringify({ requirements: [requiredAddress] }), { status: 200 }),
+      organizationModelVersions: (_url, init) => {
+        if (init.method === "PATCH") throw new Error("must not reach PATCH");
+        return new Response(JSON.stringify(draftVersionRow), { status: 200 });
+      }
+    });
+
+    const res = await app.request(
+      `/api/v1/organization-models/${organizationModelId}/draft?organizationId=${orgId}`,
+      {
+        method: "PATCH",
+        headers: authHeaders,
+        body: JSON.stringify({
+          requirementOverrides: [{ requirementId: "req-does-not-exist", reason: "typo" }]
+        })
+      },
+      env
+    );
+
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { errors: Array<{ path: string }> };
+    expect(body.errors[0]?.path).toBe("requirementOverrides");
+  });
+
+  it("rejects a requirementOverride with a blank reason (shape validation, before any repository call)", async () => {
+    stubFetch({ membership: membershipHandler("owner") });
+    const res = await app.request(
+      `/api/v1/organization-models/${organizationModelId}/draft?organizationId=${orgId}`,
+      {
+        method: "PATCH",
+        headers: authHeaders,
+        body: JSON.stringify({
+          requirementOverrides: [{ requirementId: "req-address", reason: "" }]
+        })
+      },
+      env
+    );
+    expect(res.status).toBe(422);
+  });
+
+  it("rejects a requirementOverride with an unknown/extra field", async () => {
+    stubFetch({ membership: membershipHandler("owner") });
+    const res = await app.request(
+      `/api/v1/organization-models/${organizationModelId}/draft?organizationId=${orgId}`,
+      {
+        method: "PATCH",
+        headers: authHeaders,
+        body: JSON.stringify({
+          requirementOverrides: [{ requirementId: "req-address", reason: "x", forcedBy: "system" }]
+        })
+      },
+      env
+    );
+    expect(res.status).toBe(422);
   });
 });
