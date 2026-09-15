@@ -6,6 +6,7 @@ import {
   type DocumentDefinition,
   type RequirementOverride
 } from "@inspection-platform/domain/templates";
+import { validateDataBindingsInDefinition } from "@inspection-platform/domain/data-sources";
 import {
   OrganizationModelIncompatibleError,
   OrganizationModelVersionConflictError,
@@ -316,6 +317,24 @@ export function createOrganizationModelsRoutes(
           );
         }
         definition = validation.definition;
+
+        // Task 13: structural validity (above) says nothing about
+        // whether a bindingId actually resolves or a format fits its
+        // bound field's semantic type — that's this separate,
+        // additional check, reused the same way from the domain layer.
+        const bindingsValidation = validateDataBindingsInDefinition(definition);
+        if (!bindingsValidation.valid) {
+          return c.json(
+            {
+              type: "validation_error",
+              title: "Invalid data binding",
+              status: 422,
+              requestId: c.get("requestId"),
+              errors: bindingsValidation.errors
+            },
+            422
+          );
+        }
       }
 
       // Same single-entry-point treatment for requirement overrides

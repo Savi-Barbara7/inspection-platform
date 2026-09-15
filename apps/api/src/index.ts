@@ -15,6 +15,7 @@ import { createTechnicalModelsRoutes } from "./technical-models/routes";
 import { createSupabaseTechnicalModelsRepository } from "./technical-models/supabase-technical-models-repository";
 import { createOrganizationModelsRoutes } from "./organization-models/routes";
 import { createSupabaseOrganizationModelsRepository } from "./organization-models/supabase-organization-models-repository";
+import { createDataSourcesRoutes } from "./data-sources/routes";
 import type { AppEnv } from "./types";
 
 const app = new Hono<AppEnv>();
@@ -116,6 +117,8 @@ app.route(
     (env) => createSupabaseAuditService(env.SUPABASE_URL ?? "", env.SUPABASE_PUBLISHABLE_KEY ?? "")
   )
 );
+
+app.route("/api/v1/data-sources", createDataSourcesRoutes());
 
 app.notFound((c) => {
   return c.json(

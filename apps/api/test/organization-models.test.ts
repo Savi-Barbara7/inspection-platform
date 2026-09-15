@@ -720,6 +720,206 @@ describe("PATCH /api/v1/organization-models/:id/draft", () => {
   });
 });
 
+describe("PATCH /api/v1/organization-models/:id/draft — Typed Data Sources & Bindings (Task 13)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const customerTaxIdBinding = {
+    id: "bind-1",
+    scope: { kind: "role", role: "customer" },
+    fieldId: "taxId"
+  };
+
+  it("accepts a definition whose TechnicalInformation field references a valid dataBinding", async () => {
+    let capturedBody: Record<string, unknown> | undefined;
+    const definitionWithBinding = {
+      schemaVersion: 1,
+      dataBindings: [customerTaxIdBinding],
+      sections: [
+        {
+          id: "sec-1",
+          title: "Informações do Contratante",
+          blocks: [
+            {
+              id: "blk-1",
+              type: "TechnicalInformation",
+              fields: [
+                {
+                  id: "f1",
+                  label: "CNPJ",
+                  fieldType: "text",
+                  bindingId: "bind-1",
+                  format: "identifierFormatted"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    };
+    stubFetch({
+      membership: membershipHandler("owner"),
+      technicalModelVersions: () =>
+        new Response(JSON.stringify({ requirements: [] }), { status: 200 }),
+      organizationModelVersions: (_url, init) => {
+        if (init.method === "PATCH") {
+          capturedBody = JSON.parse(init.body as string);
+          return new Response(
+            JSON.stringify({ ...draftVersionRow, definition: definitionWithBinding }),
+            {
+              status: 200
+            }
+          );
+        }
+        return new Response(JSON.stringify(draftVersionRow), { status: 200 });
+      }
+    });
+
+    const res = await app.request(
+      `/api/v1/organization-models/${organizationModelId}/draft?organizationId=${orgId}`,
+      {
+        method: "PATCH",
+        headers: authHeaders,
+        body: JSON.stringify({ definition: definitionWithBinding })
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    expect(capturedBody).toMatchObject({ definition: definitionWithBinding });
+  });
+
+  it("rejects a field whose bindingId does not match any declared dataBinding", async () => {
+    stubFetch({ membership: membershipHandler("owner") });
+    const res = await app.request(
+      `/api/v1/organization-models/${organizationModelId}/draft?organizationId=${orgId}`,
+      {
+        method: "PATCH",
+        headers: authHeaders,
+        body: JSON.stringify({
+          definition: {
+            schemaVersion: 1,
+            dataBindings: [],
+            sections: [
+              {
+                id: "sec-1",
+                title: "S",
+                blocks: [
+                  {
+                    id: "blk-1",
+                    type: "TechnicalInformation",
+                    fields: [
+                      {
+                        id: "f1",
+                        label: "CNPJ",
+                        fieldType: "text",
+                        bindingId: "bind-does-not-exist"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        })
+      },
+      env
+    );
+    expect(res.status).toBe(422);
+    const body = await res.json();
+    expect(body).toMatchObject({ type: "validation_error", title: "Invalid data binding" });
+  });
+
+  it("rejects a field whose format is incompatible with its bound field's semantic type", async () => {
+    stubFetch({ membership: membershipHandler("owner") });
+    const res = await app.request(
+      `/api/v1/organization-models/${organizationModelId}/draft?organizationId=${orgId}`,
+      {
+        method: "PATCH",
+        headers: authHeaders,
+        body: JSON.stringify({
+          definition: {
+            schemaVersion: 1,
+            // Customer.taxId is an "identifier" field -- dateShort is invalid for it.
+            dataBindings: [customerTaxIdBinding],
+            sections: [
+              {
+                id: "sec-1",
+                title: "S",
+                blocks: [
+                  {
+                    id: "blk-1",
+                    type: "TechnicalInformation",
+                    fields: [
+                      {
+                        id: "f1",
+                        label: "CNPJ",
+                        fieldType: "text",
+                        bindingId: "bind-1",
+                        format: "dateShort"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        })
+      },
+      env
+    );
+    expect(res.status).toBe(422);
+  });
+
+  it("rejects a binding referencing an unknown role (rejected before it can ever reach PostgREST)", async () => {
+    stubFetch({ membership: membershipHandler("owner") });
+    const res = await app.request(
+      `/api/v1/organization-models/${organizationModelId}/draft?organizationId=${orgId}`,
+      {
+        method: "PATCH",
+        headers: authHeaders,
+        body: JSON.stringify({
+          definition: {
+            schemaVersion: 1,
+            dataBindings: [
+              { id: "bind-1", scope: { kind: "role", role: "not-a-real-role" }, fieldId: "taxId" }
+            ],
+            sections: [{ id: "sec-1", title: "S", blocks: [] }]
+          }
+        })
+      },
+      env
+    );
+    expect(res.status).toBe(422);
+  });
+
+  it("rejects an attempt to smuggle a real entity id into a binding (cross-tenant leak is structurally impossible)", async () => {
+    stubFetch({ membership: membershipHandler("owner") });
+    const res = await app.request(
+      `/api/v1/organization-models/${organizationModelId}/draft?organizationId=${orgId}`,
+      {
+        method: "PATCH",
+        headers: authHeaders,
+        body: JSON.stringify({
+          definition: {
+            schemaVersion: 1,
+            dataBindings: [
+              {
+                id: "bind-1",
+                scope: { kind: "role", role: "customer" },
+                fieldId: "taxId",
+                customerId: "11111111-1111-1111-1111-111111111111"
+              }
+            ],
+            sections: [{ id: "sec-1", title: "S", blocks: [] }]
+          }
+        })
+      },
+      env
+    );
+    expect(res.status).toBe(422);
+  });
+});
+
 describe("PATCH /api/v1/organization-models/:id/draft — Requirement & Compatibility Guard (Task 11)", () => {
   afterEach(() => vi.unstubAllGlobals());
 
