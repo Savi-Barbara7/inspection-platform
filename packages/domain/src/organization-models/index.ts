@@ -9,6 +9,11 @@
 // gate) has somewhere to transition to — nothing here writes them.
 
 import type { DocumentDefinition } from "../templates/blocks";
+import type {
+  CompatibilityStatus,
+  CompatibilityViolation,
+  RequirementOverride
+} from "../templates/requirements";
 
 export interface OrganizationModel {
   id: string;
@@ -35,6 +40,22 @@ export interface OrganizationModelVersion {
   description: string | null;
   definition: DocumentDefinition;
   definitionSchemaVersion: number;
+  /** Recorded reasons for a required requirement that this draft intentionally no longer covers. See docs/domain/TEMPLATES.md "Requirements & Compatibility". */
+  requirementOverrides: RequirementOverride[];
+  /**
+   * Server-computed from `definition` + `requirementOverrides` against
+   * the source TechnicalModelVersion's requirement registry — recomputed
+   * on every draft write (Task 11 gate: never silently "compatible"
+   * after a required requirement's coverage is removed without an
+   * override). Never accept these two fields as client input directly.
+   * Only `required` requirements can ever make this "incompatible";
+   * `recommended`/`optional` gaps never affect it (see
+   * evaluateCompatibility() in packages/domain/src/templates/requirements.ts
+   * for the full per-requirement coverage breakdown, if a future caller
+   * needs more than this operational summary).
+   */
+  compatibilityStatus: CompatibilityStatus;
+  compatibilityViolations: CompatibilityViolation[];
   createdAt: string;
   updatedAt: string;
   publishedAt: string | null;
@@ -64,12 +85,22 @@ export interface UpdateOrganizationModelVersionInput {
   description?: string | null | undefined;
   /** Must already have passed validateDocumentDefinition() — the repository/route layer is responsible for that, not this type. */
   definition?: DocumentDefinition | undefined;
+  /** Must already have passed validateRequirementOverrides() AND had every requirementId checked against the source TechnicalModelVersion's registry — the route layer's responsibility, not this type. */
+  requirementOverrides?: RequirementOverride[] | undefined;
 }
 
 export class UnpublishedTechnicalModelVersionError extends Error {
   constructor(public readonly technicalModelIdOrSlug: string) {
     super(`"${technicalModelIdOrSlug}" has no published technical model version to derive from`);
     this.name = "UnpublishedTechnicalModelVersionError";
+  }
+}
+
+/** Thrown when a requirementOverride names a requirementId that doesn't exist on the source TechnicalModelVersion's registry — never silently ignored. */
+export class UnknownRequirementIdError extends Error {
+  constructor(public readonly requirementId: string) {
+    super(`"${requirementId}" is not a requirement on this model's source technical model version`);
+    this.name = "UnknownRequirementIdError";
   }
 }
 
@@ -107,7 +138,17 @@ export interface OrganizationModelsRepository {
     organizationId: string,
     organizationModelId: string
   ): Promise<OrganizationModelVersion | null>;
-  /** patch.definition, when present, must already be validated by the caller (validateDocumentDefinition()) before reaching this method. */
+  /**
+   * patch.definition, when present, must already be validated by the
+   * caller (validateDocumentDefinition()); patch.requirementOverrides,
+   * when present, must already have passed validateRequirementOverrides()
+   * for shape. This method recomputes compatibilityStatus/
+   * compatibilityViolations from the effective definition + overrides
+   * against the source TechnicalModelVersion's requirement registry on
+   * every call (Task 11) — never trusts a client-supplied value for
+   * either. Throws UnknownRequirementIdError if an override names a
+   * requirementId absent from that registry.
+   */
   updateDraftVersion(
     authToken: string,
     organizationId: string,

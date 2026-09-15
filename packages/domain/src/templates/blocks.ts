@@ -344,6 +344,27 @@ export function validateDocumentDefinition(input: unknown): ValidationResult {
   return { valid: true, definition: parsed.data };
 }
 
+/**
+ * Collects every section/block id present in an already-valid definition
+ * (one that has passed validateDocumentDefinition() at some point — this
+ * does not re-check uniqueness or depth). Used by the Requirement &
+ * Compatibility Guard (Task 11) to check whether the ids a requirement's
+ * `coveredBy` lists are still present after an organization edits its
+ * draft — never to validate untrusted input.
+ */
+export function collectDefinitionIds(definition: DocumentDefinition): Set<string> {
+  const ids = new Set<string>();
+  const visit = (sections: Section[]): void => {
+    for (const section of sections) {
+      ids.add(section.id);
+      for (const block of section.blocks) ids.add(block.id);
+      if (section.sections) visit(section.sections);
+    }
+  };
+  visit(definition.sections);
+  return ids;
+}
+
 function generateId(prefix: "sec" | "blk"): string {
   return `${prefix}-${crypto.randomUUID()}`;
 }

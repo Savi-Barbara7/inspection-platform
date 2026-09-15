@@ -12,8 +12,10 @@
 //     "Research status vs editorial status").
 
 import type { DocumentDefinition } from "./blocks";
+import type { Requirement } from "./requirements";
 
 export * from "./blocks";
+export * from "./requirements";
 
 export type TechnicalModelCategory =
   | "building_engineering"
@@ -114,6 +116,8 @@ export interface TechnicalModelVersion {
   /** The starting structure an OrganizationModel derivation copies (Task 10) — never a blank document. See docs/domain/TEMPLATES.md. */
   definition: DocumentDefinition;
   definitionSchemaVersion: number;
+  /** Requirement registry (Task 11) — data, never per-vertical code. Empty for every Phase 1 model seeded so far (see docs/domain/TEMPLATES.md "Requirements & Compatibility" on why no real regulatory content is populated yet). */
+  requirements: Requirement[];
   createdAt: string;
   publishedAt: string | null;
   supersededAt: string | null;
