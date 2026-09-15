@@ -31,6 +31,7 @@
 // that boundary unambiguous at the type level.
 
 import { z } from "zod";
+import { dataBindingSchema, FIELD_FORMATS, type DataBinding } from "../data-sources";
 
 export const BLOCK_TYPES = [
   "Cover",
@@ -99,7 +100,18 @@ const technicalInformationFieldSchema = z
     // A config-time default/sample shown in the field, never a real
     // answer captured during an actual inspection — see this file's
     // top-of-file "Schema vs. runtime data" note.
-    defaultValue: z.string().max(2000).optional()
+    defaultValue: z.string().max(2000).optional(),
+    // Task 13: optionally ties this field to a semantic slot declared
+    // in the document's own `dataBindings` (see ../data-sources). Purely
+    // additive and optional -- an unbound field behaves exactly as
+    // before. Changing `label` here is presentation only and never
+    // changes which DataBinding/FieldDefinition this field means (see
+    // docs/domain/DATA_SOURCES.md). Cross-referential checks (bindingId
+    // actually exists, format compatible with the bound field's type)
+    // are validateDataBindingsInDefinition()'s job, not this shape
+    // schema's -- kept separate from Task 09's own validation on purpose.
+    bindingId: idSchema.optional(),
+    format: z.enum(FIELD_FORMATS).optional()
   })
   .strict();
 
@@ -262,12 +274,23 @@ const sectionSchema: z.ZodType<Section> = z.lazy(() =>
 export interface DocumentDefinition {
   schemaVersion: typeof CURRENT_DEFINITION_SCHEMA_VERSION;
   sections: Section[];
+  /**
+   * Task 13: the definition's own semantic slots — a flat registry a
+   * TechnicalInformation field can reference by id (`bindingId`) so the
+   * same binding can be reused across multiple fields/blocks. Optional
+   * and additive: every definition stored before Task 13 simply has
+   * none, and stays perfectly valid. See ../data-sources for the
+   * DataBinding contract and validateDataBindingsInDefinition() for the
+   * cross-referential checks this shape schema does not itself perform.
+   */
+  dataBindings?: DataBinding[] | undefined;
 }
 
 const documentDefinitionShapeSchema = z
   .object({
     schemaVersion: z.literal(CURRENT_DEFINITION_SCHEMA_VERSION),
-    sections: z.array(sectionSchema).max(100)
+    sections: z.array(sectionSchema).max(100),
+    dataBindings: z.array(dataBindingSchema).max(200).optional()
   })
   .strict();
 
