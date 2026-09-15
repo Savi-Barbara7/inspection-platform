@@ -60,7 +60,7 @@ JobRuntimeValue   →  QUAL o valor efetivo desse dado NESTE trabalho (Task 14 �
 ```
 
 A regra da Task 13 ("um `DataBinding` nunca contém um id de entidade
-real") continua válida — ela é sobre a *definição* do modelo. Um
+real") continua válida — ela é sobre a _definição_ do modelo. Um
 `JobRuntimeValue.provenance` é um conceito completamente diferente: ele
 **pode e deve** carregar o id da entidade real de onde o valor veio,
 porque é exatamente aí — no trabalho, nunca no template — que essa
@@ -70,9 +70,9 @@ associação pertence.
 
 ```ts
 type ResolvedValue =
-  | { kind: "resolved"; scalar: RuntimeScalarValue }  // há um valor real, tipado
-  | { kind: "missing" }                                // não há valor (ainda)
-  | { kind: "not_applicable" }                          // este campo não se aplica aqui
+  | { kind: "resolved"; scalar: RuntimeScalarValue } // há um valor real, tipado
+  | { kind: "missing" } // não há valor (ainda)
+  | { kind: "not_applicable" } // este campo não se aplica aqui
   | { kind: "invalid"; rawValue: unknown; reason: string };
 ```
 
@@ -81,7 +81,7 @@ type ResolvedValue =
 `effectiveValue` (o que um renderer futuro deve consumir) é sempre:
 
 ```ts
-override ? override.value : capturedValue
+override ? override.value : capturedValue;
 ```
 
 nunca uma coalescência por truthiness. `getEffectiveState()` retorna `"overridden"` sempre que há um override ativo — visível explicitamente, nunca escondido dentro do estado do valor capturado.
@@ -90,10 +90,13 @@ nunca uma coalescência por truthiness. `getEffectiveState()` retorna `"overridd
 
 ```ts
 type ProvenanceType =
-  | "SOURCE_RECORD"   // veio de um cadastro real (Customer, Site, ...) — implementado
-  | "MANUAL_INPUT"    // digitado pelo usuário para este trabalho — implementado
-  | "DEFAULT"         // inicializado a partir do defaultValue do template (Task 10) — implementado
-  | "IMPORT" | "CALCULATION" | "PRIOR_JOB" | "FIELD_COLLECTION"; // reservados, não construídos ainda
+  | "SOURCE_RECORD" // veio de um cadastro real (Customer, Site, ...) — implementado
+  | "MANUAL_INPUT" // digitado pelo usuário para este trabalho — implementado
+  | "DEFAULT" // inicializado a partir do defaultValue do template (Task 10) — implementado
+  | "IMPORT"
+  | "CALCULATION"
+  | "PRIOR_JOB"
+  | "FIELD_COLLECTION"; // reservados, não construídos ainda
 ```
 
 `SOURCE_RECORD` carrega `sourceType`, `sourceRole`, `sourceEntityId`, `sourceFieldId`, `sourceReference?` e `capturedAt` — este é o único lugar em todo o domínio onde um id de entidade real é uma informação legítima e esperada.
@@ -114,9 +117,13 @@ type ProvenanceType =
 
 Esta é uma regra arquitetural, não só uma convenção: nenhuma função neste módulo (nem em nenhum outro deste domínio) sabe como ler um Customer/Site ao vivo. Um futuro `RenderPlan`/PDF deve consumir exclusivamente `JobRuntimeValue.capturedValue`/`override` — nunca reabrir uma consulta ao cadastro. Como o próprio motor não tem capacidade de fazer essa consulta, essa regra é estruturalmente impossível de violar a partir daqui.
 
-## TechnicalJob — placeholder deliberado
+## TechnicalJob — placeholder deliberado (substituído pela Task 15)
 
-`packages/domain/src/technical-jobs` existe **apenas** para dar a `JobRuntimeValue` uma âncora tenant-safe. Não é a Task 15 (workflow, árvore de documento em runtime, RepeatableGroup, evidência, participantes) — é só `{id, organizationId, organizationModelVersionId}`. Sempre aponta para uma `OrganizationModelVersion` **publicada** (nunca o draft atual — Task 14 seção 35), resolvida via `organization_models.current_published_version_id` (Task 12) no momento da criação do job.
+`packages/domain/src/technical-jobs` existia **apenas** para dar a `JobRuntimeValue` uma âncora tenant-safe (`{id, organizationId, organizationModelVersionId}`). A Task 15 substitui esse placeholder pela entidade real (workflow mínimo, árvore de documento em runtime, RepeatableGroup, SourceRole assignments) — ver `docs/domain/RUNTIME_DOCUMENT_TREE.md`. O princípio "sempre a versão publicada, nunca o draft atual" (Task 14 seção 35) permanece exatamente o mesmo depois da Task 15: `organizationModelVersionId` é fixado na criação e nunca re-resolvido, nem depois que uma versão mais nova é publicada.
+
+## GroupItem-scoped values (Task 15)
+
+`resolveBindingFieldType()` (`apps/api/src/job-runtime-values`) agora resolve um binding `GroupItem`-scoped (`context: {kind:"groupItem", groupItemId}`) contra o `repeatable.fields` da própria seção do `GroupItem` (via `GroupItem.definitionSectionId`, buscado na definição congelada do job) — nunca contra o catálogo global (que continua vazio para `GroupItem`, de propósito). O restante do fluxo de captura/override/refresh é idêntico ao de qualquer outro `SourceType`: identidade é `(technicalJobId, bindingId, contextKey)`, e dois `GroupItem`s com o mesmo `bindingId` recebem `JobRuntimeValue`s completamente independentes (contexts diferentes, sem colisão).
 
 ## Isolamento (Task 14 seção 22)
 

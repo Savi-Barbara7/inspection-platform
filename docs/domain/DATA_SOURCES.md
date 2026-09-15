@@ -54,7 +54,7 @@ futuro JobRuntimeValue (Task 14) — o CNPJ real daquele trabalho específico
 
 Note que o `label` do campo ("CNPJ") é puramente apresentacional — trocar
 para "Documento fiscal" nunca muda o `bindingId`, e portanto nunca muda
-o que aquele campo *significa*. Da mesma forma, dois campos ambos
+o que aquele campo _significa_. Da mesma forma, dois campos ambos
 rotulados "Endereço" podem ser slots completamente diferentes
 (`Customer.primaryAddress` vs. `Site.address`) — identidade é sempre
 `(sourceType, fieldId)`, nunca o texto do label.
@@ -73,8 +73,11 @@ catálogo de `technical-models` da Task 08).
 
 Fontes cobertas nesta task: `Organization`, `Customer`, `Site`,
 `Project`, `TechnicalProfessional`, `TechnicalJob`, `InspectionEvent`,
-`GroupItem` (deliberadamente vazio — RepeatableGroup ainda não existe,
-seu schema será definido pelo modelo, não globalmente), `CustomData`
+`GroupItem` (deliberadamente vazio — seu schema é definido por
+`Section.repeatable.fields`, por grupo, nunca globalmente; a Task 15
+fecha esse débito tanto na validação estática de `validateDataBindingsInDefinition()`
+quanto na resolução em runtime, ver `docs/domain/RUNTIME_DOCUMENT_TREE.md`
+"GroupItem como DataBinding source"), `CustomData`
 (um pequeno conjunto fixo de exemplo: `contractNumber`,
 `constructionPermitNumber`, `internalReference` — organização poder
 definir os próprios campos customizados é trabalho futuro).

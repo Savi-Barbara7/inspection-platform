@@ -153,15 +153,19 @@ A structured PATCH on the draft (title/description/definition/requirementOverrid
 
 **Immutability (Task 12)**: a `BEFORE UPDATE` trigger, `prevent_published_organization_model_version_mutation()`, compares the whole row via `to_jsonb(new) - 'archived_at' - 'updated_at' <> to_jsonb(old) - 'archived_at' - 'updated_at'` whenever `OLD.status = 'published'`, raising `55000` on any difference -- enforced in Postgres itself, for every role including the organization's own owner/admin/template_manager, not just an application-layer promise that the UI never sends that PATCH. `DELETE` was already fully revoked (Task 10). Comparing whole rows via `jsonb` means a column added in a future migration is protected automatically.
 
-### technical_jobs (Task 14 — DELIBERATELY minimal placeholder, see docs/domain/JOB_RUNTIME_VALUES.md)
+### technical_jobs (Task 14 placeholder, extended into the real entity by Task 15)
 
 - id uuid pk
 - organization_id uuid fk -> organizations
-- organization_model_version_id uuid, composite fk -> organization_model_versions(id, organization_id) (added in the Task 14 migration for this exact purpose) — always a *published* version, resolved from `organization_models.current_published_version_id` at creation time, never the current draft
+- organization_model_version_id uuid, composite fk -> organization_model_versions(id, organization_id) (added in the Task 14 migration for this exact purpose) — always a _published_ version, resolved from `organization_models.current_published_version_id` at creation time, never the current draft, and never re-resolved afterward even after a newer version publishes (Task 15)
+- name text not null (Task 15)
+- status text not null default 'draft', check in ('draft','active','archived') (Task 15 — deliberately minimal, no review/emission workflow yet)
+- created_by uuid null, fk -> auth.users (Task 15 — always derived from `auth.uid()` inside `materialize_technical_job()`, never a client-supplied value; null only for rows that predate this column)
+- responsible_professional_id uuid null, no FK (Task 15 — TechnicalProfessional has no backing table yet, same documented gap as job_runtime_values.provenance for that SourceType)
 - created_at, updated_at timestamptz
 - unique(id, organization_id)
 
-RLS: `SELECT` via `is_org_member`; `INSERT` via `has_org_role(array['owner','admin','coordinator'])` (reuses Task 05's `job.create`); `UPDATE` via `has_org_role(array['owner','admin','coordinator','inspector'])` (`job.edit`, unused by any route yet); `DELETE` revoked. This is NOT the real TechnicalJob (workflow, document tree, RepeatableGroup, evidence, participants) that Task 15 builds — it exists only so `job_runtime_values` has a tenant-safe anchor.
+RLS: `SELECT` via `is_org_member`; `INSERT` via `has_org_role(array['owner','admin','coordinator'])` (reuses Task 05's `job.create`); `UPDATE` via `has_org_role(array['owner','admin','coordinator','inspector'])` (`job.edit`); `DELETE` revoked. Creation always goes through `materialize_technical_job()` (below) — never a plain `INSERT` from `apps/api`.
 
 ### job_runtime_values (Task 14)
 
@@ -178,7 +182,61 @@ RLS: `SELECT` via `is_org_member`; `INSERT` via `has_org_role(array['owner','adm
 - created_at, updated_at timestamptz
 - unique(technical_job_id, binding_id, context_key) — identity is this triple, never an array position
 
-RLS: `SELECT` via `is_org_member`; `INSERT`/`UPDATE` via `has_org_role(array['owner','admin','coordinator','inspector'])` (`job.edit`); `DELETE` revoked. `apps/api` never resolves a source record itself — `capture()`/`refreshCaptured()` take an already-typed value and provenance from the caller; comparing against the *current* source value (`POST /:id/compare`) is equally pure, taking the caller-resolved current value as input rather than querying `customers`/`sites` itself.
+RLS: `SELECT` via `is_org_member`; `INSERT`/`UPDATE` via `has_org_role(array['owner','admin','coordinator','inspector'])` (`job.edit`); `DELETE` revoked. `apps/api` never resolves a source record itself — `capture()`/`refreshCaptured()` take an already-typed value and provenance from the caller; comparing against the _current_ source value (`POST /:id/compare`) is equally pure, taking the caller-resolved current value as input rather than querying `customers`/`sites` itself. Since Task 15, `resolveBindingFieldType()` also handles a `GroupItem`-scoped binding by resolving its `RepeatableGroupFieldDefinition` from the job's own frozen definition rather than the (deliberately empty) global `GroupItem` field registry.
+
+### job_source_assignments (Task 15)
+
+- id uuid pk
+- organization_id uuid fk -> organizations
+- technical_job_id uuid, composite fk -> technical_jobs(id, organization_id)
+- role text, check against the 12 `SourceRoleId`s (`packages/domain/src/data-sources`)
+- source_type text, check against the 9 `SourceType`s — supplied by the app (already resolved via `resolveSourceType()`), never re-derived in SQL
+- source_entity_id uuid not null
+- source_customer_id/source_site_id uuid null, composite fks -> customers/sites(id, organization_id) — same tenant-safe pattern as `job_runtime_values`; `check`s tie each to `source_entity_id` and enforce mutual exclusivity
+- created_at, updated_at timestamptz
+
+RLS: `SELECT` via `is_org_member`; `INSERT` via `has_org_role(array['owner','admin','coordinator'])`; `UPDATE` via `has_org_role(array['owner','admin','coordinator','inspector'])`; `DELETE` revoked. **Cardinality**: `create unique index ... on job_source_assignments (technical_job_id, role) where role <> 'supportingProfessional'` — a real, structural second line of defense behind `validateSourceAssignments()` (app layer); must be kept in sync with any future "multiple"-cardinality role.
+
+### group_items (Task 15)
+
+- id uuid pk
+- organization_id uuid fk -> organizations
+- technical_job_id uuid, composite fk -> technical_jobs(id, organization_id)
+- definition_section_id text (the repeatable `Section.id` in the job's frozen definition — not a FK, same jsonb-boundary class as `job_runtime_values.binding_id`)
+- parent_group_item_id uuid null, composite fk -> group_items(id, technical_job_id) (same-job safety for nested RepeatableGroups)
+- position integer not null default 0
+- state text not null default 'active', check in ('active','archived') — archiving never physically deletes
+- created_at, updated_at timestamptz
+- unique(id, organization_id); unique(id, technical_job_id)
+
+RLS: `SELECT` via `is_org_member`; `UPDATE` via `has_org_role(array['owner','admin','coordinator','inspector'])`; `INSERT`/`DELETE` fully revoked from `authenticated`/`anon` — a row is only ever created by `add_group_item()`/`duplicate_group_item()` (`SECURITY DEFINER`), which are the only code paths that validate `definition_section_id`/hierarchy against the job's real definition. A `BEFORE UPDATE` trigger (`prevent_group_item_identity_mutation`, same whole-row-`jsonb`-diff technique as Task 12's publish-immutability guard) freezes every column except `state`/`position`/`parent_group_item_id`/`updated_at`.
+
+### runtime_nodes (Task 15)
+
+- id uuid pk — a stable identity distinct from `definition_id`
+- organization_id uuid fk -> organizations
+- technical_job_id uuid, composite fk -> technical_jobs(id, organization_id)
+- definition_id text (the section/block id in the frozen definition — not a FK, same jsonb-boundary class as above)
+- definition_kind text, check in ('section','block')
+- block_type text null — required iff definition_kind='block' (check), null iff 'section' (check)
+- parent_node_id uuid null, composite fk -> runtime_nodes(id, technical_job_id) (same-job safety)
+- group_item_id uuid null, composite fk -> group_items(id, technical_job_id) — set only for a node materialized inside a GroupItem's own per-instance subtree
+- is_repeatable_container boolean not null default false — check: only true when definition_kind='section'
+- position integer not null default 0
+- state text not null default 'visible', check in ('visible','hidden','conditional_inactive') — never a physical delete to hide content
+- created_at, updated_at timestamptz
+- unique(id, organization_id); unique(id, technical_job_id)
+
+RLS: `SELECT` via `is_org_member`; `UPDATE` via `has_org_role(array['owner','admin','coordinator','inspector'])`; `INSERT`/`DELETE` fully revoked — rows are only ever created by the materialization RPCs below. A `BEFORE UPDATE` trigger (`prevent_runtime_node_identity_mutation`) freezes every column except `state`/`position`/`updated_at` — moving a node to a different parent is not a plain-PATCH operation in this task.
+
+**Materialization RPCs (Task 15, all `SECURITY DEFINER`, EXECUTE revoked from `anon`, granted to `authenticated` — internal helpers additionally revoked from `authenticated` too):**
+
+- `find_definition_section(p_sections jsonb, p_section_id text) returns jsonb` — depth-first search for a section by id inside an already-validated `DocumentDefinition.sections` array (internal helper).
+- `materialize_section_children(...)` / `materialize_definition_sections(...)` — recursive helpers that insert one `runtime_nodes` row per section/block, blocks-then-nested-sections in one shared, position-continuous ordering per parent (matching `packages/domain/src/runtime-document-tree`'s pure `buildMaterializationPlan()`/`buildGroupItemMaterializationPlan()` exactly); a repeatable section gets only its own container node, never its own subtree, at this stage.
+- `materialize_technical_job(p_organization_id, p_organization_model_id, p_name, p_responsible_professional_id, p_source_assignments jsonb) returns technical_jobs` — the atomic job-creation transition: resolves the model's `current_published_version_id` (rejects `55000` if null — never a draft), inserts the job (`created_by` from `auth.uid()`), inserts every `job_source_assignments` row, then materializes the whole tree from the frozen `definition.sections`. Initial `JobRuntimeValue` captures for role-scoped bindings are a deliberate best-effort follow-up in `apps/api`, not part of this transaction — a job's existence never depends on every source record resolving cleanly.
+- `add_group_item(p_organization_id, p_technical_job_id, p_container_node_id, p_parent_group_item_id default null) returns group_items` — locks the container node (`P0002` if not found, `55000` if not `is_repeatable_container`), looks up that section in the job's own frozen definition (`find_definition_section`), inserts the `group_items` row, and materializes that section's own children scoped to the new `group_item_id`.
+- `duplicate_group_item(p_organization_id, p_technical_job_id, p_group_item_id) returns group_items` — clones a GroupItem's own subtree (a parent-first recursive CTE walk plus a per-call temporary id-remap table, `on commit drop` — no explicit `DELETE` needed or allowed: an unqualified `DELETE` on that table would be rejected by Supabase's `plan_filter` safety guard for the `authenticated` role) with entirely new ids throughout; does not cascade into nested GroupItems.
+- `reorder_runtime_nodes(p_organization_id, p_technical_job_id, p_parent_node_id, p_group_item_id, p_ordered_node_ids uuid[]) returns void` — validates the ordered id list is exactly the current children of that `(parent_node_id, group_item_id)` scope (`22023` otherwise, no partial reorders), then reassigns `position` — ids never change.
 
 ## Inspections
 

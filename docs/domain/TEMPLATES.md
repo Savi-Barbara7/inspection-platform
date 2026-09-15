@@ -121,6 +121,10 @@ Cada bloco carrega dado e apresentação juntos: não existe um schema de coleta
 - `canonicalize()` / `serializeDefinitionCanonical()` — serialização estável: duas definições logicamente idênticas produzem sempre a mesma string, independente da ordem de inserção das chaves usada para construí-las (ordem de array é preservada, por ser semanticamente significativa).
 - `CURRENT_DEFINITION_SCHEMA_VERSION` — versão do próprio DSL; uma mudança quebradora futura nos blocos incrementa essa constante em vez de reinterpretar definições já armazenadas sob a versão antiga.
 
+### RepeatableGroup (extensão da Task 15)
+
+`Section.repeatable?: RepeatableGroupConfig` é um campo opcional e aditivo — toda `Section` gravada antes da Task 15 simplesmente não o tem e continua válida. Marca essa seção como o **template** de um grupo repetível: seus próprios `blocks`/`sections` descrevem o que **uma instância** parece; a árvore runtime materializa zero ou mais instâncias a partir dela (Task 15 — nunca a definição em si). `repeatable.fields` é o schema de dados **desse grupo**, nunca um catálogo global (ver `docs/domain/DATA_SOURCES.md` — `GroupItem` continua deliberadamente vazio no catálogo). Um `RepeatableGroup` pode aninhar outro, respeitando o mesmo `MAX_SECTION_DEPTH` — sem limite de aninhamento separado.
+
 ### Fora de escopo da Task 09 (deliberado)
 
 Nenhuma tabela nova foi criada para persistir uma `DocumentDefinition` real — isso fica para quando `OrganizationModel`/publicação (Task 10+) precisar de um lugar concreto para gravá-la. Task 09 entrega o engine validado e testado (inclusive contra uma estrutura realista de um dos 14 modelos da Fase 1, nos testes), não a integração de persistência.
