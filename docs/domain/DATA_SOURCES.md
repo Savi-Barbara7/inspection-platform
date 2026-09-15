@@ -198,3 +198,12 @@ persistence completa (Task 15). Editor de rich text/tokens de texto
 `DataBinding` usado por um bloco, já que `dataBindings` vive num único
 lugar por documento — mas nenhum editor foi construído). UI. Lookup
 externo de CNPJ. OCR/IA.
+
+## Continuação: JobRuntimeValue (Task 14)
+
+Este documento cobre até `DataBinding`/`FieldPlacement` — a definição.
+O valor efetivo de um binding **dentro de um trabalho real** (captura,
+provenance, override, refresh explícito) é `docs/domain/JOB_RUNTIME_VALUES.md`
+— um conceito seguinte, nunca confundido com os daqui: um `DataBinding`
+nunca contém um id de entidade real; um `JobRuntimeValue.provenance`
+pode e deve conter um.

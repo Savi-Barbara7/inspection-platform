@@ -153,6 +153,33 @@ A structured PATCH on the draft (title/description/definition/requirementOverrid
 
 **Immutability (Task 12)**: a `BEFORE UPDATE` trigger, `prevent_published_organization_model_version_mutation()`, compares the whole row via `to_jsonb(new) - 'archived_at' - 'updated_at' <> to_jsonb(old) - 'archived_at' - 'updated_at'` whenever `OLD.status = 'published'`, raising `55000` on any difference -- enforced in Postgres itself, for every role including the organization's own owner/admin/template_manager, not just an application-layer promise that the UI never sends that PATCH. `DELETE` was already fully revoked (Task 10). Comparing whole rows via `jsonb` means a column added in a future migration is protected automatically.
 
+### technical_jobs (Task 14 — DELIBERATELY minimal placeholder, see docs/domain/JOB_RUNTIME_VALUES.md)
+
+- id uuid pk
+- organization_id uuid fk -> organizations
+- organization_model_version_id uuid, composite fk -> organization_model_versions(id, organization_id) (added in the Task 14 migration for this exact purpose) — always a *published* version, resolved from `organization_models.current_published_version_id` at creation time, never the current draft
+- created_at, updated_at timestamptz
+- unique(id, organization_id)
+
+RLS: `SELECT` via `is_org_member`; `INSERT` via `has_org_role(array['owner','admin','coordinator'])` (reuses Task 05's `job.create`); `UPDATE` via `has_org_role(array['owner','admin','coordinator','inspector'])` (`job.edit`, unused by any route yet); `DELETE` revoked. This is NOT the real TechnicalJob (workflow, document tree, RepeatableGroup, evidence, participants) that Task 15 builds — it exists only so `job_runtime_values` has a tenant-safe anchor.
+
+### job_runtime_values (Task 14)
+
+- id uuid pk
+- organization_id uuid fk -> organizations
+- technical_job_id uuid, composite fk -> technical_jobs(id, organization_id)
+- binding_id text (a `DataBinding.id` from the job's own `organization_model_versions.definition.dataBindings` — **not** a foreign key: a DataBinding lives inside jsonb, not a relational table, so this is an accepted app-layer-only validation boundary, same class already accepted for `organizations.settings`/`sites.address`/`technical_model_versions.definition` elsewhere in this schema)
+- context jsonb, default `{"kind":"job"}` + context_key text, default `'job'` (deterministic string form of `context` — see `contextKey()` in the domain layer; only `"job"` is ever written by Task 14, `groupItem`/`inspectionEvent` are a typed extension point for later)
+- field_type text (snapshotted from `FieldDefinition` at capture time — Task 14 section 34 versioning safety, never re-resolved against a possibly-changed catalog)
+- captured_value jsonb (a `ResolvedValue` — `resolved`/`missing`/`not_applicable`/`invalid`, never a bare `null`)
+- provenance jsonb (`SOURCE_RECORD` | `MANUAL_INPUT` | `DEFAULT` — the one place in this whole schema where a real entity id legitimately lives inside a jsonb blob, unlike a template's `DataBinding`)
+- override jsonb null (`{value, reason?, setBy, setAt}` — never destroys `captured_value`/`provenance` when set)
+- source_customer_id uuid null, composite fk -> customers(id, organization_id); source_site_id uuid null, composite fk -> sites(id, organization_id) — the one **real, FK-enforced** guarantee against cross-tenant provenance, populated only when `provenance.sourceType` is `Customer`/`Site` respectively (`check (source_customer_id is null or source_site_id is null)`). `TechnicalProfessional`/`Project`/etc. have no backing table yet, so their `sourceEntityId` (inside `provenance` only) is **not** structurally validated — a known, documented gap, not an oversight.
+- created_at, updated_at timestamptz
+- unique(technical_job_id, binding_id, context_key) — identity is this triple, never an array position
+
+RLS: `SELECT` via `is_org_member`; `INSERT`/`UPDATE` via `has_org_role(array['owner','admin','coordinator','inspector'])` (`job.edit`); `DELETE` revoked. `apps/api` never resolves a source record itself — `capture()`/`refreshCaptured()` take an already-typed value and provenance from the caller; comparing against the *current* source value (`POST /:id/compare`) is equally pure, taking the caller-resolved current value as input rather than querying `customers`/`sites` itself.
+
 ## Inspections
 
 ### inspections
