@@ -20,7 +20,11 @@
 // (not built yet), never inside a template's own definition.
 
 import { z } from "zod";
-import type { DocumentDefinition, Section } from "../templates/blocks";
+import type {
+  DocumentDefinition,
+  RepeatableGroupFieldDefinition,
+  Section
+} from "../templates/blocks";
 
 export const SOURCE_TYPES = [
   "Organization",
@@ -430,8 +434,49 @@ export function validateDataBindingsInDefinition(
     bindingsById.set(result.binding.id, result.binding);
   });
 
-  function visitSections(sections: Section[], path: string): void {
+  // Task 15 closes the Task 13 debt: a currentGroupItem/ancestorGroupItem
+  // binding is validated against the schema of the *enclosing repeatable
+  // group it's actually used in* -- never a global GroupItem registry
+  // (there isn't one, and there never will be: a repeatable group's own
+  // field names are template data, not engine vocabulary) and never a
+  // lookup keyed by model slug. groupSchemaStack carries one entry per
+  // enclosing repeatable section, innermost last, so nested groups
+  // resolve `currentGroupItem` (levelsUp 0) and `ancestorGroupItem`
+  // (levelsUp N) unambiguously.
+  function findGroupItemFieldDefinition(
+    binding: DataBinding,
+    groupSchemaStack: readonly RepeatableGroupFieldDefinition[][]
+  ): { fieldDef?: RepeatableGroupFieldDefinition; error?: string } {
+    const levelsUp = binding.scope.kind === "ancestorGroupItem" ? binding.scope.levelsUp : 0;
+    const index = groupSchemaStack.length - 1 - levelsUp;
+    if (index < 0) {
+      return {
+        error: `no enclosing repeatable group ${levelsUp} level(s) up from where this binding is used`
+      };
+    }
+    const schema = groupSchemaStack[index]!;
+    const fieldDef = schema.find((f) => f.fieldId === binding.fieldId);
+    if (!fieldDef) {
+      return {
+        error: `"${binding.fieldId}" is not a declared field on the enclosing repeatable group`
+      };
+    }
+    return { fieldDef };
+  }
+
+  function visitSections(
+    sections: Section[],
+    path: string,
+    groupSchemaStack: readonly RepeatableGroupFieldDefinition[][]
+  ): void {
     sections.forEach((section, sectionIndex) => {
+      // This section's own fields (if it's a repeatable group) apply to
+      // both its own direct blocks and everything nested under it --
+      // pushed onto the stack before either is visited.
+      const stackHere = section.repeatable
+        ? [...groupSchemaStack, section.repeatable.fields]
+        : groupSchemaStack;
+
       section.blocks.forEach((block, blockIndex) => {
         if (block.type !== "TechnicalInformation") return;
         block.fields.forEach((field, fieldIndex) => {
@@ -445,28 +490,37 @@ export function validateDataBindingsInDefinition(
             });
             return;
           }
-          if (field.format !== undefined) {
-            const sourceType = resolveScopeSourceType(binding.scope);
-            const fieldDef =
-              sourceType === "GroupItem"
-                ? undefined
-                : getFieldDefinition(sourceType, binding.fieldId);
-            // GroupItem's schema isn't global (see FIELD_DEFINITIONS
-            // above) -- format compatibility can't be checked yet, so
-            // it's deliberately skipped rather than guessed at.
-            if (fieldDef && !isFormatCompatible(fieldDef.fieldType, field.format)) {
-              errors.push({
-                path: `${fieldPath}.format`,
-                message: `format "${field.format}" is not compatible with field type "${fieldDef.fieldType}"`
-              });
+
+          const sourceType = resolveScopeSourceType(binding.scope);
+          let fieldDef: { fieldType: FieldType } | undefined;
+          if (sourceType === "GroupItem") {
+            const result = findGroupItemFieldDefinition(binding, stackHere);
+            if (result.error) {
+              errors.push({ path: `${fieldPath}.bindingId`, message: result.error });
+            } else {
+              fieldDef = result.fieldDef;
             }
+          } else {
+            fieldDef = getFieldDefinition(sourceType, binding.fieldId);
+          }
+
+          if (
+            field.format !== undefined &&
+            fieldDef &&
+            !isFormatCompatible(fieldDef.fieldType, field.format)
+          ) {
+            errors.push({
+              path: `${fieldPath}.format`,
+              message: `format "${field.format}" is not compatible with field type "${fieldDef.fieldType}"`
+            });
           }
         });
       });
-      if (section.sections) visitSections(section.sections, `${path}.${sectionIndex}.sections`);
+      if (section.sections)
+        visitSections(section.sections, `${path}.${sectionIndex}.sections`, stackHere);
     });
   }
-  visitSections(definition.sections, "sections");
+  visitSections(definition.sections, "sections", []);
 
   return errors.length === 0 ? { valid: true } : { valid: false, errors };
 }

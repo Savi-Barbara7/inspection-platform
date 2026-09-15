@@ -31,7 +31,13 @@
 // that boundary unambiguous at the type level.
 
 import { z } from "zod";
-import { dataBindingSchema, FIELD_FORMATS, type DataBinding } from "../data-sources";
+import {
+  dataBindingSchema,
+  FIELD_FORMATS,
+  FIELD_TYPES,
+  type DataBinding,
+  type FieldType
+} from "../data-sources";
 
 export const BLOCK_TYPES = [
   "Cover",
@@ -250,14 +256,66 @@ export type HeaderBlock = z.infer<typeof headerBlockSchema>;
 export type FooterBlock = z.infer<typeof footerBlockSchema>;
 export type PageBreakBlock = z.infer<typeof pageBreakBlockSchema>;
 
-/** Sections nest up to this many levels deep (a top-level section counts as depth 1) — "controlled" nesting, not arbitrary recursion. */
+/** Sections nest up to this many levels deep (a top-level section counts as depth 1) — "controlled" nesting, not arbitrary recursion. This limit applies equally to repeatable nesting (Task 15: Imóvel → Ambientes → Elementos) — no special-cased recursion exists for it. */
 export const MAX_SECTION_DEPTH = 3;
+
+/**
+ * One field a RepeatableGroup's per-item data (a Task 15 GroupItem)
+ * carries — the schema for that group only, never a global catalog
+ * (Task 13 explicitly left GroupItem's own field registry empty for
+ * this exact reason: "lindeiro.address"/"pavimento.level" are template
+ * data, not engine vocabulary). A DataBinding scoped to
+ * currentGroupItem/ancestorGroupItem is validated against the
+ * enclosing repeatable section's own `fields` here, never a slug-keyed
+ * lookup — see validateDataBindingsInDefinition() in ../data-sources.
+ */
+export interface RepeatableGroupFieldDefinition {
+  fieldId: string;
+  label: string;
+  fieldType: FieldType;
+  required?: boolean | undefined;
+}
+
+const repeatableGroupFieldDefinitionSchema = z
+  .object({
+    fieldId: z.string().trim().min(1).max(100),
+    label: z.string().trim().min(1).max(200),
+    fieldType: z.enum(FIELD_TYPES),
+    required: z.boolean().optional()
+  })
+  .strict();
+
+/**
+ * Marks a Section as a repeatable group's TEMPLATE (Task 15): its own
+ * `blocks`/`sections` describe what ONE instance looks like — the
+ * runtime tree materializes zero or more GroupItems from it, never the
+ * definition itself. `fields` is this group's own GroupItem data
+ * schema (see RepeatableGroupFieldDefinition above). A repeatable
+ * section may itself contain a nested repeatable section (nested
+ * groups), bound by the same MAX_SECTION_DEPTH as everything else —
+ * no separate nesting limit exists for repeatables.
+ */
+export interface RepeatableGroupConfig {
+  labelSingular: string;
+  labelPlural: string;
+  fields: RepeatableGroupFieldDefinition[];
+}
+
+const repeatableGroupConfigSchema = z
+  .object({
+    labelSingular: z.string().trim().min(1).max(200),
+    labelPlural: z.string().trim().min(1).max(200),
+    fields: z.array(repeatableGroupFieldDefinitionSchema).max(50)
+  })
+  .strict();
 
 export interface Section {
   id: string;
   title: string;
   blocks: Block[];
   sections?: Section[] | undefined;
+  /** Task 15, optional and additive — every Section stored before Task 15 simply lacks it and stays perfectly valid. */
+  repeatable?: RepeatableGroupConfig | undefined;
 }
 
 const sectionSchema: z.ZodType<Section> = z.lazy(() =>
@@ -266,7 +324,8 @@ const sectionSchema: z.ZodType<Section> = z.lazy(() =>
       id: idSchema,
       title: z.string().trim().min(1).max(200),
       blocks: z.array(blockSchema).max(200),
-      sections: z.array(sectionSchema).max(50).optional()
+      sections: z.array(sectionSchema).max(50).optional(),
+      repeatable: repeatableGroupConfigSchema.optional()
     })
     .strict()
 );

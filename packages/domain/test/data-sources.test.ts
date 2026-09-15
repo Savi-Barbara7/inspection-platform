@@ -234,6 +234,226 @@ describe("validateDataBindingsInDefinition()", () => {
   });
 });
 
+describe("Task 15: GroupItem bindings resolve against the enclosing repeatable group's own schema", () => {
+  function groupItemBinding(id: string, fieldId: string, levelsUp?: number): DataBinding {
+    return {
+      id,
+      scope:
+        levelsUp === undefined
+          ? { kind: "currentGroupItem" }
+          : { kind: "ancestorGroupItem", levelsUp },
+      fieldId
+    };
+  }
+
+  function definitionWithRepeatableSection(
+    dataBindings: DataBinding[],
+    repeatableFields: Array<{ fieldId: string; label: string; fieldType: "text" | "date" }>,
+    groupItemFieldBindingId: string
+  ): DocumentDefinition {
+    return {
+      schemaVersion: 1,
+      dataBindings,
+      sections: [
+        {
+          id: "sec-group",
+          title: "Imóveis Vistoriados",
+          blocks: [],
+          repeatable: {
+            labelSingular: "Imóvel",
+            labelPlural: "Imóveis",
+            fields: repeatableFields
+          },
+          sections: [
+            {
+              id: "sec-group-item-detail",
+              title: "Características Gerais",
+              blocks: [
+                {
+                  id: "blk-group-item",
+                  type: "TechnicalInformation",
+                  fields: [
+                    {
+                      id: "f-group-item",
+                      label: "Qualquer rótulo",
+                      fieldType: "text",
+                      bindingId: groupItemFieldBindingId
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    };
+  }
+
+  it("a currentGroupItem binding resolves against the enclosing repeatable group's own fields", () => {
+    const binding = groupItemBinding("bind-1", "areaName");
+    const definition = definitionWithRepeatableSection(
+      [binding],
+      [{ fieldId: "areaName", label: "Nome da Área", fieldType: "text" }],
+      "bind-1"
+    );
+    expect(validateDataBindingsInDefinition(definition).valid).toBe(true);
+  });
+
+  it("a currentGroupItem binding used directly on the repeatable section's own blocks (not nested) also resolves", () => {
+    const binding = groupItemBinding("bind-1", "areaName");
+    const definition: DocumentDefinition = {
+      schemaVersion: 1,
+      dataBindings: [binding],
+      sections: [
+        {
+          id: "sec-group",
+          title: "Imóveis Vistoriados",
+          repeatable: {
+            labelSingular: "Imóvel",
+            labelPlural: "Imóveis",
+            fields: [{ fieldId: "areaName", label: "Nome da Área", fieldType: "text" }]
+          },
+          blocks: [
+            {
+              id: "blk-1",
+              type: "TechnicalInformation",
+              fields: [
+                { id: "f1", label: "Qualquer rótulo", fieldType: "text", bindingId: "bind-1" }
+              ]
+            }
+          ]
+        }
+      ]
+    };
+    expect(validateDataBindingsInDefinition(definition).valid).toBe(true);
+  });
+
+  it("rejects a currentGroupItem binding whose fieldId is not declared on the enclosing group's schema", () => {
+    const binding = groupItemBinding("bind-1", "notDeclared");
+    const definition = definitionWithRepeatableSection(
+      [binding],
+      [{ fieldId: "areaName", label: "Nome da Área", fieldType: "text" }],
+      "bind-1"
+    );
+    const result = validateDataBindingsInDefinition(definition);
+    expect(result.valid).toBe(false);
+  });
+
+  it("rejects a currentGroupItem/ancestorGroupItem binding used with no enclosing repeatable section at all", () => {
+    const binding = groupItemBinding("bind-1", "areaName");
+    const definition = definitionWith([binding], [{ id: "f1", bindingId: "bind-1" }]);
+    const result = validateDataBindingsInDefinition(definition);
+    expect(result.valid).toBe(false);
+  });
+
+  it("resolves ancestorGroupItem (levelsUp) against the correct ancestor group's schema in a nested-groups fixture", () => {
+    const outerBinding = groupItemBinding("bind-outer", "buildingName", 1);
+    const innerBinding = groupItemBinding("bind-inner", "roomLabel");
+    const definition: DocumentDefinition = {
+      schemaVersion: 1,
+      dataBindings: [outerBinding, innerBinding],
+      sections: [
+        {
+          id: "sec-outer-group",
+          title: "Edificações",
+          blocks: [],
+          repeatable: {
+            labelSingular: "Edificação",
+            labelPlural: "Edificações",
+            fields: [{ fieldId: "buildingName", label: "Nome da Edificação", fieldType: "text" }]
+          },
+          sections: [
+            {
+              id: "sec-inner-group",
+              title: "Ambientes",
+              blocks: [],
+              repeatable: {
+                labelSingular: "Ambiente",
+                labelPlural: "Ambientes",
+                fields: [{ fieldId: "roomLabel", label: "Rótulo do Ambiente", fieldType: "text" }]
+              },
+              sections: [
+                {
+                  id: "sec-inner-detail",
+                  title: "Detalhes",
+                  blocks: [
+                    {
+                      id: "blk-detail",
+                      type: "TechnicalInformation",
+                      fields: [
+                        {
+                          id: "f-outer",
+                          label: "Nome da edificação (ancestral)",
+                          fieldType: "text",
+                          bindingId: "bind-outer"
+                        },
+                        {
+                          id: "f-inner",
+                          label: "Rótulo deste ambiente",
+                          fieldType: "text",
+                          bindingId: "bind-inner"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    };
+    expect(validateDataBindingsInDefinition(definition).valid).toBe(true);
+  });
+
+  it("rejects ancestorGroupItem when levelsUp exceeds the actual nesting depth", () => {
+    const tooFarBinding = groupItemBinding("bind-far", "roomLabel", 5);
+    const definition: DocumentDefinition = {
+      schemaVersion: 1,
+      dataBindings: [tooFarBinding],
+      sections: [
+        {
+          id: "sec-outer-group",
+          title: "Edificações",
+          blocks: [],
+          repeatable: {
+            labelSingular: "Edificação",
+            labelPlural: "Edificações",
+            fields: [{ fieldId: "buildingName", label: "Nome da Edificação", fieldType: "text" }]
+          },
+          sections: [
+            {
+              id: "sec-inner-group",
+              title: "Ambientes",
+              repeatable: {
+                labelSingular: "Ambiente",
+                labelPlural: "Ambientes",
+                fields: [{ fieldId: "roomLabel", label: "Rótulo do Ambiente", fieldType: "text" }]
+              },
+              blocks: [
+                {
+                  id: "blk-detail",
+                  type: "TechnicalInformation",
+                  fields: [
+                    {
+                      id: "f-far",
+                      label: "Muito longe demais",
+                      fieldType: "text",
+                      bindingId: "bind-far"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    };
+    const result = validateDataBindingsInDefinition(definition);
+    expect(result.valid).toBe(false);
+  });
+});
+
 describe("8/9. the same catalog works across every vertical, with no per-model code", () => {
   it("8. Customer.taxId works identically in a Cautelar-shaped and an Entrega-shaped definition", () => {
     const cautelarLike = definitionWith(
