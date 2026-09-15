@@ -149,18 +149,31 @@ Capability nova: `organization_model.read` (concedida a todo role exceto `billin
 
 Requirement & Compatibility Guard (Task 11); publicação/imutabilidade de `OrganizationModelVersion` (Task 12); `TechnicalJob` e qualquer dado de execução real (Task 13+); editor visual/frontend; fotos; renderizador de PDF; branding; assinaturas.
 
-## Requirements
+## Requirements & Compatibility (Task 11)
 
-Cada requisito de uma `TechnicalModelVersion` tem:
+> **Implementação:** `packages/domain/src/templates/requirements.ts`
+> (`Requirement`, `RequirementOverride`, `validateRequirements()`,
+> `validateRequirementOverrides()`, `evaluateCompatibility()`) +
+> `supabase/migrations/20260915000000_requirement_compatibility_guard.sql`.
 
-- `requirement_id`, `label`, `level` (`required` | `recommended` | `optional`);
-- `source_reference` (norma/lei/manual de origem);
-- `applies_when` (condição de aplicabilidade);
-- `covered_by` (section/block/fields que atendem o requisito);
-- `organization_override` + `override_reason` quando a organização altera;
-- `compatibility_effect` (se remover um `required` derruba o status "compatível com o modelo-base").
+Cada `TechnicalModelVersion` carrega um `requirements: Requirement[]` (coluna `requirements jsonb`, default `'[]'`) — dado puro, sem nenhuma lógica por vertical:
 
-Nenhum modelo declara conformidade normativa (ex.: "conforme NBR X") sem fonte, versão e revisão por profissional habilitado com acesso legítimo à norma — ver `docs/product/technical-models/RESEARCH_PROTOCOL.md` para os status (`RESEARCH_ONLY` → `VERIFIED_REFERENCE_MODEL`).
+- `requirementId`, `label`, `level` (`required` | `recommended` | `optional`);
+- `sourceReference` (norma/lei/manual de origem);
+- `appliesWhen` opcional (condição de aplicabilidade);
+- `coveredBy`: ids de section/block (do próprio `DocumentDefinition`) que atendem o requisito.
+
+`OrganizationModelVersion` carrega `requirementOverrides: RequirementOverride[]` (`{requirementId, reason}` — motivo obrigatório, nunca em branco) e dois campos **calculados pelo servidor, nunca aceitos como valor vindo do cliente**: `compatibilityStatus` (`compatible` | `incompatible`) e `compatibilityViolations`. `evaluateCompatibility()` (pura, sem I/O) recebe o registro de requisitos da `TechnicalModelVersion` de origem, o `definition` atual do rascunho e os `requirementOverrides` atuais, e recalcula os dois campos a cada escrita no rascunho (`PATCH /:id/draft`), em `apps/api/src/organization-models/supabase-organization-models-repository.ts`.
+
+**O gate da Task 11**: `compatibilityStatus` só vira `incompatible` quando um requisito `required` perde cobertura (algum id do seu `coveredBy` não existe mais no `definition` atual) **e** não há um `requirementOverride` correspondente. Um requisito `recommended`/`optional` sem cobertura nunca derruba o status. Um `requirementOverride` sem `reason` é rejeitado (422) antes de chegar ao repositório — não existe "aceitar a incompatibilidade" silenciosamente; ou o requisito continua coberto, ou a lacuna aparece em `compatibilityViolations`, ou fica registrada com motivo explícito em `requirementOverrides`. Um `requirementOverride` que nomeia um `requirementId` inexistente no registro da `TechnicalModelVersion` de origem é rejeitado com 422 (`UnknownRequirementIdError`) — nunca ignorado silenciosamente.
+
+**Risco residual aceito, documentado deliberadamente** (mesma classe já aceita para `organizations.settings`/`sites.address` em outros pontos do schema): `compatibility_status`/`compatibility_violations` são colunas comuns, sem trigger no Postgres que as recalcule — apenas a camada de API (`apps/api`) as escreve corretamente, sempre repassando a credencial do próprio chamador (nunca `service_role`). Um chamador que contornasse a API e fizesse um PATCH cru via PostgREST na sua própria linha poderia, em tese, gravar um `compatibility_status` que não reflete a realidade. Isso não é uma falha cross-tenant nem de escalação de privilégio (RLS continua restringindo a linha à própria organização, que já tem direito de editá-la) — apenas o próprio indicador da organização sobre suas próprias escolhas poderia ficar incorreto. Um futuro gate de publicação (Task 12) ou renderizador de laudo que precise de garantia mais forte deve recalcular a compatibilidade a partir de `definition`/`requirement_overrides`, não confiar cegamente nesta coluna.
+
+Nesta task, nenhum dos 14 modelos seedados da Fase 1 recebeu um registro de requisitos real (todos ficam com `requirements = '[]'`, portanto trivialmente `compatible`) — popular exigências normativas reais sem fonte/revisão por profissional habilitado seria exatamente o tipo de alegação de conformidade que este projeto evita (ver `docs/product/technical-models/RESEARCH_PROTOCOL.md`). O motor é validado com fixtures fictícias nos testes (`packages/domain/test/requirements.test.ts`, `apps/api/test/organization-models.test.ts`, `supabase/tests/requirement_compatibility_guard_test.sql`).
+
+### Fora de escopo da Task 11 (deliberado)
+
+Popular requisitos regulatórios reais para qualquer um dos 14 modelos; publicação/imutabilidade de `OrganizationModelVersion` (Task 12); `TechnicalJob` (Task 13+); qualquer UI/editor visual para gerenciar requisitos ou overrides.
 
 ## Contratos (mantidos do modelo anterior, agora por seção/bloco)
 

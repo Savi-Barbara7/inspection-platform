@@ -110,6 +110,7 @@ No `contacts` table yet -- out of scope for Task 07; `email`/`phone` on customer
 - unique(technical_model_id, version_number)
 - definition jsonb (Task 10: a `DocumentDefinition`, Controlled Block DSL — see `docs/domain/TEMPLATES.md`; never blank for a published version, so `OrganizationModel` derivation always starts from real structure)
 - definition_schema_version integer (mirrors `DocumentDefinition.schemaVersion`)
+- requirements jsonb, default `'[]'` (Task 11: array of `Requirement` — data only, see `docs/domain/TEMPLATES.md` "Requirements & Compatibility"; empty for every Phase 1 model seeded so far, deliberately not populated with unverified regulatory content)
 
 No client-facing write path at all: `authenticated` has `SELECT` only (RLS: `active` models, `published`/`superseded` versions), `anon` has no grant. Write is migration/seed-only -- see `docs/domain/TEMPLATES.md` "Quem escreve".
 
@@ -138,12 +139,15 @@ RLS: `SELECT` via `is_org_member`; `INSERT`/`UPDATE` via `has_org_role(organizat
 - description text null
 - definition jsonb (a `DocumentDefinition`; copied verbatim from the source `technical_model_versions.definition` at derivation time — never starts blank)
 - definition_schema_version integer
+- requirement_overrides jsonb, default `'[]'` (Task 11: array of `RequirementOverride` — `{requirementId, reason}`, reason never blank)
+- compatibility_status text, default `'compatible'`, `check (in ('compatible','incompatible'))` (Task 11: server-computed only — see the accepted residual-risk note below and in `docs/domain/TEMPLATES.md`)
+- compatibility_violations jsonb, default `'[]'` (Task 11: the required, uncovered, non-overridden requirements driving `compatibility_status = 'incompatible'`)
 - created_at, updated_at, published_at, archived_at timestamptz
 - unique(organization_model_id, version_number)
 
 RLS: same shape as `organization_models` (`SELECT` via `is_org_member`, role-gated `INSERT`/`UPDATE`, `DELETE` revoked). Creation goes through `derive_organization_model(p_organization_id, p_technical_model_id, p_name)`, a `SECURITY DEFINER` RPC that atomically inserts both the `organization_models` row and its initial draft `organization_model_versions` row, re-checks `has_org_role` itself (SECURITY DEFINER bypasses RLS), and rejects (`P0002`) a `technical_models` row that is not `active` or has no `current_published_version_id`. `EXECUTE` is explicitly revoked from `anon`, granted to `authenticated` only, in the same migration that creates the function (see the Task 05.1 lesson in AGENTS.md about `pg_default_acl`).
 
-A structured PATCH on the draft (title/description/definition) goes through plain RLS-gated PostgREST — no dedicated RPC, since it is a single-row update with no cross-table atomicity concern. Any `definition` in that PATCH must already have passed `validateDocumentDefinition()` (Task 09) at the API layer before it reaches PostgREST; the 13 block schemas are never re-declared in `apps/api`.
+A structured PATCH on the draft (title/description/definition/requirementOverrides) goes through plain RLS-gated PostgREST — no dedicated RPC, since it is a single-row update with no cross-table atomicity concern. Any `definition` in that PATCH must already have passed `validateDocumentDefinition()` (Task 09) at the API layer before it reaches PostgREST; the 13 block schemas are never re-declared in `apps/api`. Likewise, any `requirementOverrides` must already have passed `validateRequirementOverrides()` for shape, and every `requirementId` in it must exist on the source `technical_model_versions.requirements` (checked by the repository, `UnknownRequirementIdError` -> 422). `compatibility_status`/`compatibility_violations` are recomputed by the API layer (`evaluateCompatibility()`, Task 11) on every draft write and are never accepted as client input — see `docs/domain/TEMPLATES.md` "Requirements & Compatibility" for the accepted residual risk of a caller bypassing the API with a raw PostgREST PATCH to these two columns (same class already accepted for `organizations.settings`/`sites.address`).
 
 ## Inspections
 
