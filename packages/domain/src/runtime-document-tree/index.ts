@@ -182,6 +182,8 @@ export interface RuntimeNode {
 /** active: part of the job's live structure. archived: soft-hidden, recoverable, never physically deleted -- see Task 15 section 20. */
 export type GroupItemState = "active" | "archived";
 
+export const GROUP_ITEM_STATES: readonly GroupItemState[] = ["active", "archived"];
+
 export interface GroupItem {
   id: string;
   organizationId: string;
@@ -324,4 +326,97 @@ export function buildDocumentTree(
     .filter((n) => n.parentNodeId === null && n.groupItemId === null)
     .sort((a, b) => a.position - b.position)
     .map((n) => nodeToTreeNode(n, nodes, groupItems, null, includeArchived));
+}
+
+/** Thrown when a runtime node id doesn't exist in this job/organization. */
+export class RuntimeNodeNotFoundError extends Error {
+  constructor(public readonly nodeId: string) {
+    super(`runtime node "${nodeId}" was not found in this job`);
+    this.name = "RuntimeNodeNotFoundError";
+  }
+}
+
+/** Thrown when add_group_item() targets a node that isn't a RepeatableGroup container. */
+export class NotARepeatableContainerError extends Error {
+  constructor(public readonly nodeId: string) {
+    super(`runtime node "${nodeId}" is not a repeatable group container`);
+    this.name = "NotARepeatableContainerError";
+  }
+}
+
+/** Thrown when a group item id doesn't exist in this job/organization. */
+export class GroupItemNotFoundError extends Error {
+  constructor(public readonly groupItemId: string) {
+    super(`group item "${groupItemId}" was not found in this job`);
+    this.name = "GroupItemNotFoundError";
+  }
+}
+
+/** Thrown when reorder_runtime_nodes()'s ordered id list doesn't exactly match the current children of the given parent/group-item scope. */
+export class ReorderMismatchError extends Error {
+  constructor() {
+    super("the ordered id list does not match the current children of this parent");
+    this.name = "ReorderMismatchError";
+  }
+}
+
+export interface AddGroupItemInput {
+  containerNodeId: string;
+  parentGroupItemId?: string | undefined;
+}
+
+export interface ReorderRuntimeNodesInput {
+  parentNodeId: string | null;
+  groupItemId: string | null;
+  orderedNodeIds: string[];
+}
+
+/**
+ * Port implemented by an infrastructure adapter (Supabase/Postgres in
+ * apps/api). Every call is scoped to the acting user's own credential —
+ * never service_role — and an explicit organizationId/technicalJobId.
+ * Structural validation (does this node really belong to this job, is
+ * it really a repeatable container, does the ordered id list really
+ * match) always happens in the SECURITY DEFINER RPCs themselves, never
+ * only in this adapter.
+ */
+export interface RuntimeDocumentTreeRepository {
+  getTree(
+    authToken: string,
+    organizationId: string,
+    technicalJobId: string,
+    options?: BuildDocumentTreeOptions
+  ): Promise<DocumentTreeNode[]>;
+  addGroupItem(
+    authToken: string,
+    organizationId: string,
+    technicalJobId: string,
+    input: AddGroupItemInput
+  ): Promise<GroupItem>;
+  duplicateGroupItem(
+    authToken: string,
+    organizationId: string,
+    technicalJobId: string,
+    groupItemId: string
+  ): Promise<GroupItem>;
+  updateGroupItemState(
+    authToken: string,
+    organizationId: string,
+    technicalJobId: string,
+    groupItemId: string,
+    state: GroupItemState
+  ): Promise<GroupItem | null>;
+  reorderNodes(
+    authToken: string,
+    organizationId: string,
+    technicalJobId: string,
+    input: ReorderRuntimeNodesInput
+  ): Promise<void>;
+  updateNodeState(
+    authToken: string,
+    organizationId: string,
+    technicalJobId: string,
+    nodeId: string,
+    state: RuntimeNodeState
+  ): Promise<RuntimeNode | null>;
 }

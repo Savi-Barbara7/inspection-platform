@@ -52,6 +52,12 @@ export interface CreateTechnicalJobInput {
   sourceAssignments: SourceAssignmentInput[];
 }
 
+export interface UpdateTechnicalJobInput {
+  name?: string | undefined;
+  status?: TechnicalJobStatus | undefined;
+  responsibleProfessionalId?: string | null | undefined;
+}
+
 export interface TechnicalJobListItem {
   id: string;
   name: string;
@@ -95,4 +101,10 @@ export interface TechnicalJobsRepository {
   ): Promise<TechnicalJob>;
   getById(authToken: string, organizationId: string, id: string): Promise<TechnicalJob | null>;
   list(authToken: string, organizationId: string): Promise<TechnicalJobListItem[]>;
+  update(
+    authToken: string,
+    organizationId: string,
+    id: string,
+    input: UpdateTechnicalJobInput
+  ): Promise<TechnicalJob | null>;
 }

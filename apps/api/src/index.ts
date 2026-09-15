@@ -18,6 +18,9 @@ import { createSupabaseOrganizationModelsRepository } from "./organization-model
 import { createDataSourcesRoutes } from "./data-sources/routes";
 import { createTechnicalJobsRoutes } from "./technical-jobs/routes";
 import { createSupabaseTechnicalJobsRepository } from "./technical-jobs/supabase-technical-jobs-repository";
+import { createSupabaseJobSourceAssignmentsRepository } from "./job-source-assignments/supabase-job-source-assignments-repository";
+import { createSupabaseRuntimeDocumentTreeRepository } from "./runtime-document-tree/supabase-runtime-document-tree-repository";
+import { createGroupItemsRoutes } from "./group-items/routes";
 import { createJobRuntimeValuesRoutes } from "./job-runtime-values/routes";
 import { createSupabaseJobRuntimeValuesRepository } from "./job-runtime-values/supabase-job-runtime-values-repository";
 import type { AppEnv } from "./types";
@@ -129,6 +132,30 @@ app.route(
   createTechnicalJobsRoutes(
     (env) =>
       createSupabaseTechnicalJobsRepository(
+        env.SUPABASE_URL ?? "",
+        env.SUPABASE_PUBLISHABLE_KEY ?? ""
+      ),
+    (env) =>
+      createSupabaseJobSourceAssignmentsRepository(
+        env.SUPABASE_URL ?? "",
+        env.SUPABASE_PUBLISHABLE_KEY ?? ""
+      ),
+    (env) =>
+      createSupabaseRuntimeDocumentTreeRepository(
+        env.SUPABASE_URL ?? "",
+        env.SUPABASE_PUBLISHABLE_KEY ?? ""
+      ),
+    (env) =>
+      createSupabaseMembershipLookup(env.SUPABASE_URL ?? "", env.SUPABASE_PUBLISHABLE_KEY ?? ""),
+    (env) => createSupabaseAuditService(env.SUPABASE_URL ?? "", env.SUPABASE_PUBLISHABLE_KEY ?? "")
+  )
+);
+
+app.route(
+  "/api/v1/group-items",
+  createGroupItemsRoutes(
+    (env) =>
+      createSupabaseRuntimeDocumentTreeRepository(
         env.SUPABASE_URL ?? "",
         env.SUPABASE_PUBLISHABLE_KEY ?? ""
       ),
