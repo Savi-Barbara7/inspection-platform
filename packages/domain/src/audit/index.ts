@@ -22,7 +22,8 @@ export type AuditAction =
   | "organization_model.updated"
   | "organization_model.archived"
   | "organization_model_version.created"
-  | "organization_model_version.updated";
+  | "organization_model_version.updated"
+  | "organization_model_version.published";
 
 export type AuditEntityType =
   | "organization"

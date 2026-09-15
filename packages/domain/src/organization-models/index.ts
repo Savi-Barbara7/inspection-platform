@@ -3,10 +3,12 @@
 // docs/domain/TEMPLATES.md and ADR-0017. Tenant-owned (organizationId
 // required everywhere), unlike TechnicalModel/TechnicalModelVersion.
 //
-// This task never publishes a version: every OrganizationModelVersion
-// created/updated through this port stays "draft". "published"/
-// "archived" exist as states so Task 12 (the actual publish/immutability
-// gate) has somewhere to transition to — nothing here writes them.
+// Task 12 adds the actual publish/immutability transition: publish()
+// atomically freezes the current draft as the new
+// currentPublishedVersionId and opens the next draft as an exact copy.
+// A published version is never edited in place — Postgres itself
+// enforces this (see the Task 12 migration's trigger), not just this
+// port's contract.
 
 import type { DocumentDefinition } from "../templates/blocks";
 import type {
@@ -21,6 +23,8 @@ export interface OrganizationModel {
   technicalModelId: string;
   name: string;
   currentDraftVersionId: string | null;
+  /** Explicit identity of the currently live/published version — never inferred by querying the latest published row (Task 12). Null until the first successful publish. */
+  currentPublishedVersionId: string | null;
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -104,6 +108,43 @@ export class UnknownRequirementIdError extends Error {
   }
 }
 
+/** Thrown by publish() when the draft is incompatible with its base model (Task 11's gate, re-checked at publish time — never trusts the persisted compatibility_status). Carries the violations so a caller can surface them without a second round trip. */
+export class OrganizationModelIncompatibleError extends Error {
+  constructor(public readonly violations: CompatibilityViolation[]) {
+    super("organization model version is incompatible with its base model and cannot be published");
+    this.name = "OrganizationModelIncompatibleError";
+  }
+}
+
+/** Thrown by publish() when the draft was already published (or otherwise left draft status) before this call could act on it — e.g. a duplicate/retried publish request. Never silently re-publishes or skips a version number. */
+export class OrganizationModelVersionNotDraftError extends Error {
+  constructor(public readonly organizationModelVersionId: string) {
+    super(
+      `organization model version "${organizationModelVersionId}" is not a draft and cannot be published`
+    );
+    this.name = "OrganizationModelVersionNotDraftError";
+  }
+}
+
+/** Thrown by publish() when the draft was edited concurrently between the compatibility recomputation and the publish transaction acquiring its row lock — the recomputed compatibility would be stale. Caller should refetch the draft and retry. */
+export class OrganizationModelVersionConflictError extends Error {
+  constructor(public readonly organizationModelVersionId: string) {
+    super(
+      `organization model version "${organizationModelVersionId}" was modified concurrently; refresh and try again`
+    );
+    this.name = "OrganizationModelVersionConflictError";
+  }
+}
+
+export interface PublishOrganizationModelResult {
+  organizationModel: OrganizationModel;
+  publishedVersion: OrganizationModelVersion;
+  /** The exact-copy draft opened immediately after publishing, so editing can continue without a "no draft exists" state. */
+  newDraftVersion: OrganizationModelVersion;
+  /** The organization model's currentPublishedVersionId immediately before this call, or null if this was the first publish. For audit trails. */
+  previousPublishedVersionId: string | null;
+}
+
 /**
  * Port implemented by an infrastructure adapter (Supabase/Postgres in
  * apps/api). Every call is scoped to the acting user's own credential and
@@ -138,6 +179,12 @@ export interface OrganizationModelsRepository {
     organizationId: string,
     organizationModelId: string
   ): Promise<OrganizationModelVersion | null>;
+  /** Reads the version at currentPublishedVersionId directly (never the latest published row by timestamp/version_number) — null if the model has never been published. */
+  getPublishedVersion(
+    authToken: string,
+    organizationId: string,
+    organizationModelId: string
+  ): Promise<OrganizationModelVersion | null>;
   /**
    * patch.definition, when present, must already be validated by the
    * caller (validateDocumentDefinition()); patch.requirementOverrides,
@@ -155,4 +202,25 @@ export interface OrganizationModelsRepository {
     organizationModelId: string,
     patch: UpdateOrganizationModelVersionInput
   ): Promise<OrganizationModelVersion | null>;
+  /**
+   * Atomically (Task 12): recomputes compatibility from the current
+   * draft's live definition/requirementOverrides — never trusts the
+   * persisted compatibility_status — and rejects with
+   * OrganizationModelIncompatibleError if a required requirement is
+   * uncovered without a matching override. On success, freezes the
+   * draft as published (immutable from then on, enforced by Postgres,
+   * not just this contract) and opens an exact-copy next draft so
+   * editing can continue immediately. Returns null if there is no draft
+   * to publish. Throws OrganizationModelVersionNotDraftError if the
+   * draft was already published/changed state before this call could
+   * act on it (duplicate/retried publish), or
+   * OrganizationModelVersionConflictError if it was edited concurrently
+   * after compatibility was recomputed but before the publish
+   * transaction could acquire its row lock.
+   */
+  publish(
+    authToken: string,
+    organizationId: string,
+    organizationModelId: string
+  ): Promise<PublishOrganizationModelResult | null>;
 }
