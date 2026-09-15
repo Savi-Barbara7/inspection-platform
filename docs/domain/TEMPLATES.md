@@ -206,6 +206,10 @@ Requirement overrides continuam explícitos: publicar nunca cria um override soz
 
 `TechnicalJob` e qualquer execução real (Task 13+); `EmissionSnapshot`; renderizador/PDF/`RenderPlan`; fotos/evidência real; editor visual/frontend. `OrganizationModel.name` (metadata do modelo, não da versão) continua editável livremente mesmo depois de publicações — renomear o modelo nunca altera nenhuma `OrganizationModelVersion` histórica.
 
+## Typed Data Sources, Roles & Bindings (Task 13)
+
+Ver `docs/domain/DATA_SOURCES.md` para a documentação completa — resumo: `DocumentDefinition` ganhou um campo opcional `dataBindings: DataBinding[]` (Task 13, `packages/domain/src/data-sources`), e `TechnicalInformationField` ganhou `bindingId`/`format` opcionais. Nenhuma migration nova (bindings vivem dentro do `definition jsonb` já existente). Um `DataBinding` referencia um papel (`SourceRole`) + campo semântico (`FieldDefinition`) — nunca uma entidade real de uma organização específica, o que mantém `OrganizationModelVersion` livre de qualquer id de tenant mesmo depois desta task. O catálogo (`FIELD_DEFINITIONS`/`SOURCE_ROLES`) é global e determinístico — o mesmo `Customer.taxId` funciona identicamente em qualquer modelo, sem nenhum branch por slug.
+
 ## Contratos (mantidos do modelo anterior, agora por seção/bloco)
 
 `data_schema_json`-equivalente: contrato de dados de cada bloco (ex.: campos do `TechnicalInformation`).
