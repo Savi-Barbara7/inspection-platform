@@ -125,6 +125,24 @@ suporte a múltiplos pais).
 > (`runtime_nodes.group_item_id`), eliminando essa classe de bug
 > estruturalmente em vez de apenas validá-la. Migration:
 > `20260915040000_task_15_5a_runtime_tree_integrity.sql`.
+>
+> **Sobre o backfill de `container_node_id` nessa migration:** a lógica
+> que preencheu `container_node_id` para linhas pré-existentes de
+> `group_items` (`definition_id` + `parent_group_item_id` + `LIMIT 1`)
+> é, em princípio, insegura para dados históricos ambíguos — essa
+> migration já está aplicada e **não pode ser reescrita** (regra deste
+> repositório). A correção da rodada de red-team (migration
+> `20260916150000_task_15_5a_redteam_fixes.sql`) **não previne** esse
+> backfill original — ele já rodou. O que ela adiciona é uma checagem
+> estrutural que roda **depois**, comparando cada `container_node_id`
+> já gravado contra o pai real derivado da própria subárvore
+> materializada daquele `GroupItem`, e **aborta** (nunca escolhe
+> arbitrariamente) se algum deles divergir. É detecção pós-backfill, não
+> prevenção do backfill histórico — a distinção importa porque a
+> migration original só funcionou corretamente porque staging e local
+> tinham zero linhas em `group_items` no momento em que rodou (verificado
+> por query direta antes e depois); nenhuma instalação com `GroupItem`s
+> anteriores a essa migration foi testada contra o backfill em si.
 
 ## GroupItem como DataBinding source (fechando o débito da Task 13)
 
@@ -218,6 +236,38 @@ Postgres reais e concorrentes (não apenas pgTAP sequencial): uma
 de fato uma `reorder_group_items()` concorrente por ~2.1s (nem deadlock,
 nem falha instantânea) — ao desbloquear, o reorder detectou a revisão
 alterada e abortou corretamente, sem aplicar nenhuma mudança parcial.
+Esse experimento é um script versionado e reproduzível —
+`supabase/tests/concurrency/task_15_5a_lock_order_and_revision.sh` —
+não só um resultado de terminal relatado uma vez; roda contra o
+Supabase local e falha alto (assertions explícitas, não "olhe a
+saída") se a ordem de lock ou a proteção de revisão regredirem.
+`restore_group_item()` não tem um script equivalente separado contra
+`reorder_group_items()`: trava na EXATA mesma ordem que
+`duplicate_group_item()` (container `FOR UPDATE` primeiro, depois o
+`GroupItem` alvo) — o mesmo argumento de ordem de lock que o script
+prova para duplicate-vs-reorder vale, sem diferença de código, para
+restore-vs-reorder.
+
+**`group_items_revision` é genuinamente server-controlled, não só "a
+chamada de reorder não expõe um jeito de mudá-lo" (correção pós-15.5A,
+segunda rodada de red-team):** a proteção acima seria inútil se
+`runtime_nodes` ainda aceitasse `UPDATE` de `group_items_revision` por
+qualquer outra via — um cliente `authenticated` poderia ler a revisão
+`r`, esperar uma escrita legítima alheia avançá-la para `r+1`, então
+fazer um PATCH direto devolvendo o valor para `r`, e só então reenviar
+o reorder obsoleto com `expectedRevision=r`, passando pela checagem sem
+nunca ter visto o estado real. Fechado na fronteira do banco, não na
+API: `UPDATE` em `runtime_nodes` é restrito por coluna —
+`authenticated` só pode escrever `state`; `position` e
+`group_items_revision` não são concedidos a nenhum client role, então
+um `UPDATE` citando qualquer um dos dois falha com `42501` antes de
+tocar qualquer linha, para a declaração inteira. Nenhuma RPC
+`SECURITY DEFINER` é afetada (executam como o dono da função, nunca
+como o role que chamou). Provado tanto sob role `authenticated` real em
+pgTAP (tentativa de reescrever `group_items_revision` diretamente →
+`42501`; revisão permanece inalterada; um reorder obsoleto que tenta
+"reaproveitar" a revisão antiga continua rejeitado com `40001`) quanto
+via HTTP real contra `wrangler dev` local.
 
 ## Duplicar e arquivar
 

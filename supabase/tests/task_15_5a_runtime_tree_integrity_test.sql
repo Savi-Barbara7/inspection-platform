@@ -12,7 +12,7 @@
 -- (not just deprecated). Fictitious fixtures only.
 
 begin;
-select plan(51);
+select plan(57);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures: Org A (owner) and Org B (owner), each with one Customer.
@@ -461,6 +461,84 @@ select is(
   '5. group_items_revision was bumped by exactly 1 after the successful reorder'
 );
 
+-- ---------------------------------------------------------------------------
+-- Second red-team review, finding #1 (BLOCK): group_items_revision must
+-- be genuinely server-controlled -- not just "the client's own reorder
+-- call doesn't expose a way to change it". Full attack scenario: read
+-- revision r, a legitimate op bumps it to r+1, attacker tries to PATCH
+-- it back to r directly via runtime_nodes, then replays a stale reorder
+-- with expectedRevision=r. Every step here must fail exactly as if the
+-- attack were never attempted.
+-- ---------------------------------------------------------------------------
+
+-- Step 1: r = current revision (v_rev_1, already captured above).
+-- Step 2: a legitimate structural op bumps it to r+1.
+select lives_ok(
+  format(
+    $$ select public.duplicate_group_item('a0000000-0000-0000-0000-000000000001', %L, %L) $$,
+    (select id from public.technical_jobs where organization_id = 'a0000000-0000-0000-0000-000000000001' and name = 'Job A'),
+    :'v_item2_id'
+  ),
+  '1. a legitimate structural op (duplicate) bumps the revision to r+1'
+);
+
+select group_items_revision as v_rev_2 from public.runtime_nodes where id = :'v_outer_container_id' \gset
+
+select is(
+  :v_rev_2::int, (:v_rev_1::int + 1),
+  '1. group_items_revision is now r+1 after the legitimate op'
+);
+
+-- Step 3: attacker (still the same authenticated, legitimately
+-- privileged user -- this is not a permissions escalation test, it is
+-- a "can ANY client write this column at all" test) tries to PATCH
+-- group_items_revision back to the old value r directly on
+-- runtime_nodes. Must be rejected at the grant level -- UPDATE on
+-- runtime_nodes is column-restricted to `state` only (second red-team
+-- fix) -- never silently accepted, never silently ignored.
+select throws_ok(
+  format(
+    $$ update public.runtime_nodes set group_items_revision = %L where id = %L $$,
+    :v_rev_1, :'v_outer_container_id'
+  ),
+  '42501', null,
+  '1. direct UPDATE of runtime_nodes.group_items_revision is rejected outright (permission denied) for authenticated -- it is not a grantable column'
+);
+
+-- Step 3b: same rejection when position is the (only or additional)
+-- column named -- the pre-existing runtime_nodes.position debt closed
+-- by the same column-grant mechanism (second red-team fix, section 7).
+select throws_ok(
+  format(
+    $$ update public.runtime_nodes set position = 99 where id = %L $$,
+    :'v_outer_container_id'
+  ),
+  '42501', null,
+  '1. direct UPDATE of runtime_nodes.position is rejected outright (permission denied) for authenticated -- reorder_runtime_nodes() is the only sanctioned path'
+);
+
+-- Step 4: the attack attempt changed nothing -- revision is still r+1.
+select is(
+  (select group_items_revision from public.runtime_nodes where id = :'v_outer_container_id'),
+  :v_rev_2::int,
+  '1. the rejected direct-write attempts left group_items_revision completely untouched (still r+1)'
+);
+
+-- Step 5: a reorder replayed with the stale r (the value BEFORE the
+-- legitimate bump, exactly what the attacker wanted to make current
+-- again) is still rejected -- the attack did not work.
+select throws_ok(
+  format(
+    $$ select public.reorder_group_items('a0000000-0000-0000-0000-000000000001', %L, %L, array[%L, %L, %L, %L]::uuid[], %L) $$,
+    (select id from public.technical_jobs where organization_id = 'a0000000-0000-0000-0000-000000000001' and name = 'Job A'),
+    :'v_outer_container_id', :'v_item0_id', :'v_item1_id', :'v_item2_id',
+    (select id from public.group_items where container_node_id = :'v_outer_container_id' and id not in (:'v_item0_id', :'v_item1_id', :'v_item2_id') limit 1),
+    :v_rev_1
+  ),
+  '40001', null,
+  '1. a reorder replayed with the stale pre-bump revision is rejected even after a real attempt to reset the counter directly -- the attack scenario does not succeed end to end'
+);
+
 -- Re-submitting the SAME reorder with the now-stale v_rev_0 (the value
 -- from before the successful reorder above) is rejected too -- proves
 -- the check is against the CURRENT revision, not a one-time token.
@@ -478,7 +556,7 @@ select throws_ok(
   format(
     $$ select public.reorder_group_items('a0000000-0000-0000-0000-000000000001', %L, %L, array[%L]::uuid[], %L) $$,
     (select id from public.technical_jobs where organization_id = 'a0000000-0000-0000-0000-000000000001' and name = 'Job A'),
-    :'v_outer_container_id', (select id from public.group_items where technical_job_id = (select id from public.technical_jobs where organization_id = 'a0000000-0000-0000-0000-000000000001' and name = 'Job A') and definition_section_id = 'sec-outer' limit 1), :v_rev_1
+    :'v_outer_container_id', (select id from public.group_items where technical_job_id = (select id from public.technical_jobs where organization_id = 'a0000000-0000-0000-0000-000000000001' and name = 'Job A') and definition_section_id = 'sec-outer' limit 1), :v_rev_2
   ),
   '22023', null,
   '9. reorder_group_items() rejects a list that omits existing siblings'
@@ -488,7 +566,7 @@ select throws_ok(
   format(
     $$ select public.reorder_group_items('a0000000-0000-0000-0000-000000000001', %L, %L, array[%L, %L, %L]::uuid[], %L) $$,
     (select id from public.technical_jobs where organization_id = 'a0000000-0000-0000-0000-000000000001' and name = 'Job A'),
-    :'v_outer_container_id', :'v_item0_id', :'v_item0_id', :'v_item1_id', :v_rev_1
+    :'v_outer_container_id', :'v_item0_id', :'v_item0_id', :'v_item1_id', :v_rev_2
   ),
   '22023', null,
   '8. reorder_group_items() rejects a list with a DUPLICATED id (e.g. [A, A, C] instead of [A, B, C]) -- never silently drops the omitted sibling'
@@ -602,8 +680,8 @@ select is(
   (select count(*)::int from public.group_items
      where technical_job_id = (select id from public.technical_jobs where organization_id = 'a0000000-0000-0000-0000-000000000001' and name = 'Job A')
        and definition_section_id = 'sec-outer'),
-  4,
-  '10. the restored item still exists -- never physically deleted (2 originals + 1 duplicate-of-outer1 + 1 new = 4)'
+  5,
+  '10. the restored item still exists -- never physically deleted (2 originals + 1 duplicate-of-outer1 + 1 duplicate-of-item2 (second red-team attack scenario) + 1 new = 5)'
 );
 
 -- restoring an already-active item is a no-op (idempotent).

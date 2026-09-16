@@ -16,7 +16,7 @@
 -- Fictitious fixtures only.
 
 begin;
-select plan(43);
+select plan(44);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures: Org A (owner, inspector) and Org B (owner), each with one
@@ -458,14 +458,35 @@ select is(
   '16. a conditional_inactive node is persisted, still present in the tree'
 );
 
+-- Task 15.5A second red-team fix: UPDATE on runtime_nodes is now
+-- column-restricted to `state` only for authenticated -- a PATCH
+-- naming ANY other column (identity or not) is rejected outright at
+-- the grant level, before the identity trigger even runs.
+select throws_ok(
+  format(
+    $$ update public.runtime_nodes set definition_id = 'smuggled' where id = %L $$,
+    (select id from public.runtime_nodes where technical_job_id = (select id from public.technical_jobs where organization_id = 'f0000000-0000-0000-0000-000000000001' and name = 'Job A') and definition_id = 'sec-info')
+  ),
+  '42501', null,
+  'a plain client UPDATE naming definition_id is rejected outright (permission denied) -- UPDATE is column-restricted to state only (Task 15.5A second red-team fix), never reaching the identity trigger'
+);
+
+-- Defense-in-depth: even bypassing the grant restriction (as postgres,
+-- the same privilege level a SECURITY DEFINER RPC runs at), the
+-- identity trigger still independently rejects rewriting definition_id
+-- -- proving the trigger itself is still correct, not just resting on
+-- the column-grant restriction as the only line of defense.
+reset role;
 select throws_ok(
   format(
     $$ update public.runtime_nodes set definition_id = 'smuggled' where id = %L $$,
     (select id from public.runtime_nodes where technical_job_id = (select id from public.technical_jobs where organization_id = 'f0000000-0000-0000-0000-000000000001' and name = 'Job A') and definition_id = 'sec-info')
   ),
   '55000', null,
-  'a plain client UPDATE can never rewrite a runtime node''s identity (definition_id) -- only state/position may change'
+  'even bypassing the column-grant restriction (as postgres), the identity trigger independently rejects rewriting definition_id -- defense-in-depth, not the grant restriction alone'
 );
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-900000000001","role":"authenticated"}', true);
 
 -- ---------------------------------------------------------------------------
 -- 14. Cross-job: a node from one job can never be reordered as if it
