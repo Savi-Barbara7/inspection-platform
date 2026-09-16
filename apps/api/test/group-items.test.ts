@@ -10,6 +10,7 @@ const authHeaders = { Authorization: "Bearer valid-token" };
 const orgId = "10000000-0000-0000-0000-000000000001";
 const jobId = "a0000000-0000-0000-0000-000000000001";
 const groupItemId = "e0000000-0000-0000-0000-000000000001";
+const containerNodeId = "c0000000-0000-0000-0000-000000000001";
 
 function membershipHandler(role: string | null): (url: string, init: RequestInit) => Response {
   return () =>
@@ -23,6 +24,7 @@ function groupItemRow(overrides: Partial<Record<string, unknown>> = {}) {
     id: groupItemId,
     organization_id: orgId,
     technical_job_id: jobId,
+    container_node_id: containerNodeId,
     definition_section_id: "sec-group",
     parent_group_item_id: null,
     position: 0,
@@ -37,6 +39,7 @@ function stubFetch(handlers: {
   membership?: (url: string, init: RequestInit) => Response;
   groupItems?: (url: string, init: RequestInit) => Response;
   duplicateRpc?: (init: RequestInit) => Response;
+  restoreRpc?: (init: RequestInit) => Response;
   auditRpc?: (init: RequestInit) => Response;
 }) {
   vi.stubGlobal(
@@ -55,6 +58,9 @@ function stubFetch(handlers: {
       }
       if (url.startsWith(`${env.SUPABASE_URL}/rest/v1/rpc/duplicate_group_item`)) {
         if (handlers.duplicateRpc) return handlers.duplicateRpc(init);
+      }
+      if (url.startsWith(`${env.SUPABASE_URL}/rest/v1/rpc/restore_group_item`)) {
+        if (handlers.restoreRpc) return handlers.restoreRpc(init);
       }
       if (
         url.startsWith(`${env.SUPABASE_URL}/rest/v1/organization_memberships`) &&
@@ -108,14 +114,14 @@ describe("PATCH /api/v1/group-items/:id", () => {
     expect(capturedAudit).toMatchObject({ p_action: "group_item.archived" });
   });
 
-  it("returns 404 when the group item doesn't exist in this job/organization", async () => {
+  it("returns 404 when the group item doesn't exist in this job/organization (archive path)", async () => {
     stubFetch({
       membership: membershipHandler("owner"),
       groupItems: () => new Response(null, { status: 406 })
     });
     const res = await app.request(
       `/api/v1/group-items/${groupItemId}?organizationId=${orgId}&technicalJobId=${jobId}`,
-      { method: "PATCH", headers: authHeaders, body: JSON.stringify({ state: "active" }) },
+      { method: "PATCH", headers: authHeaders, body: JSON.stringify({ state: "archived" }) },
       env
     );
     expect(res.status).toBe(404);
@@ -129,6 +135,56 @@ describe("PATCH /api/v1/group-items/:id", () => {
       env
     );
     expect(res.status).toBe(422);
+  });
+
+  // Task 15.5A: restoring to "active" always goes through
+  // restore_group_item() -- never a plain PATCH -- because it must
+  // compute a fresh, non-colliding position rather than reclaiming
+  // whatever position the row still holds from before it was archived.
+  it("restores an archived group item via restore_group_item(), with a freshly computed position, and audits it", async () => {
+    let capturedRpcBody: Record<string, unknown> | undefined;
+    let capturedAudit: Record<string, unknown> | undefined;
+    stubFetch({
+      membership: membershipHandler("inspector"),
+      restoreRpc: (init) => {
+        capturedRpcBody = JSON.parse(init.body as string);
+        return new Response(JSON.stringify(groupItemRow({ state: "active", position: 3 })), {
+          status: 200
+        });
+      },
+      auditRpc: (init) => {
+        capturedAudit = JSON.parse(init.body as string);
+        return new Response(JSON.stringify({ id: "audit-event-1" }), { status: 200 });
+      }
+    });
+    const res = await app.request(
+      `/api/v1/group-items/${groupItemId}?organizationId=${orgId}&technicalJobId=${jobId}`,
+      { method: "PATCH", headers: authHeaders, body: JSON.stringify({ state: "active" }) },
+      env
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { state: string; position: number };
+    expect(body).toMatchObject({ state: "active", position: 3 });
+    expect(capturedRpcBody).toMatchObject({
+      p_organization_id: orgId,
+      p_technical_job_id: jobId,
+      p_group_item_id: groupItemId
+    });
+    expect(capturedAudit).toMatchObject({ p_action: "group_item.updated" });
+  });
+
+  it("returns 404 from the restore path when the group item doesn't exist", async () => {
+    stubFetch({
+      membership: membershipHandler("owner"),
+      restoreRpc: () =>
+        new Response(JSON.stringify({ code: "P0002", message: "not found" }), { status: 400 })
+    });
+    const res = await app.request(
+      `/api/v1/group-items/${groupItemId}?organizationId=${orgId}&technicalJobId=${jobId}`,
+      { method: "PATCH", headers: authHeaders, body: JSON.stringify({ state: "active" }) },
+      env
+    );
+    expect(res.status).toBe(404);
   });
 });
 

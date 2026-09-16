@@ -59,14 +59,22 @@ const updateTechnicalJobSchema = z
   .refine((data) => Object.keys(data).length > 0, { message: "at least one field is required" });
 
 const addGroupItemSchema = z.object({
-  containerNodeId: z.string().uuid(),
-  parentGroupItemId: z.string().uuid().optional()
+  containerNodeId: z.string().uuid()
 });
 
 const reorderSchema = z.object({
   parentNodeId: z.string().uuid().nullable(),
   groupItemId: z.string().uuid().nullable(),
   orderedNodeIds: z.array(z.string().uuid()).min(1)
+});
+
+// GroupItem reorder is a separate contract from RuntimeNode reorder
+// above: containerNodeId alone fully scopes the sibling set (Task
+// 15.5A) -- there is no separate "which parent" parameter to also
+// carry, the way node reorder needs both parentNodeId and groupItemId.
+const reorderGroupItemsSchema = z.object({
+  containerNodeId: z.string().uuid(),
+  orderedGroupItemIds: z.array(z.string().uuid()).min(1)
 });
 
 /**
@@ -255,8 +263,7 @@ export function createTechnicalJobsRoutes(
           organizationId,
           technicalJobId,
           {
-            containerNodeId: parsed.data.containerNodeId,
-            parentGroupItemId: parsed.data.parentGroupItemId
+            containerNodeId: parsed.data.containerNodeId
           }
         );
       } catch (err) {
@@ -330,6 +337,56 @@ export function createTechnicalJobsRoutes(
           parentNodeId: parsed.data.parentNodeId,
           groupItemId: parsed.data.groupItemId,
           nodeCount: parsed.data.orderedNodeIds.length
+        },
+        requestId: c.get("requestId")
+      });
+
+      return c.json({ success: true });
+    }
+  );
+
+  routes.post(
+    "/:id/group-items/reorder",
+    requireAuth,
+    validateTechnicalJobId,
+    validateOrganizationIdQuery,
+    requireCapability("job.edit", getMembershipLookup, (c) => c.req.query("organizationId")!),
+    async (c) => {
+      const parsed = reorderGroupItemsSchema.safeParse(await c.req.json().catch(() => ({})));
+      if (!parsed.success) {
+        return c.json(validationError(c.get("requestId"), parsed.error.issues), 422);
+      }
+
+      const authToken = c.get("authToken")!;
+      const organizationId = c.req.query("organizationId")!;
+      const technicalJobId = c.req.param("id");
+
+      try {
+        await getTreeRepository(c.env).reorderGroupItems(authToken, organizationId, technicalJobId, {
+          containerNodeId: parsed.data.containerNodeId,
+          orderedGroupItemIds: parsed.data.orderedGroupItemIds
+        });
+      } catch (err) {
+        if (err instanceof ReorderMismatchError) {
+          return c.json(
+            fieldValidationError(c.get("requestId"), "orderedGroupItemIds", err.message),
+            422
+          );
+        }
+        if (err instanceof RuntimeNodeNotFoundError) {
+          return c.json(notFoundErrorBase(c.get("requestId"), "Runtime node not found"), 404);
+        }
+        throw err;
+      }
+
+      await recordAuditEventBestEffort(getAuditService(c.env), authToken, {
+        organizationId,
+        action: "group_item.reordered",
+        entityType: "technical_job",
+        entityId: technicalJobId,
+        metadata: {
+          containerNodeId: parsed.data.containerNodeId,
+          itemCount: parsed.data.orderedGroupItemIds.length
         },
         requestId: c.get("requestId")
       });

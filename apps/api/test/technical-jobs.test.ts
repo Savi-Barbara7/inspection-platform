@@ -31,6 +31,7 @@ function stubFetch(handlers: {
   groupItems?: (url: string, init: RequestInit) => Response;
   addGroupItemRpc?: (init: RequestInit) => Response;
   reorderRpc?: (init: RequestInit) => Response;
+  reorderGroupItemsRpc?: (init: RequestInit) => Response;
   auditRpc?: (init: RequestInit) => Response;
 }) {
   vi.stubGlobal(
@@ -55,6 +56,9 @@ function stubFetch(handlers: {
       }
       if (url.startsWith(`${env.SUPABASE_URL}/rest/v1/rpc/reorder_runtime_nodes`)) {
         if (handlers.reorderRpc) return handlers.reorderRpc(init);
+      }
+      if (url.startsWith(`${env.SUPABASE_URL}/rest/v1/rpc/reorder_group_items`)) {
+        if (handlers.reorderGroupItemsRpc) return handlers.reorderGroupItemsRpc(init);
       }
       if (
         url.startsWith(`${env.SUPABASE_URL}/rest/v1/organization_memberships`) &&
@@ -406,6 +410,7 @@ describe("POST /api/v1/technical-jobs/:id/group-items", () => {
             id: "e0000000-0000-0000-0000-000000000001",
             organization_id: orgId,
             technical_job_id: jobId,
+            container_node_id: nodeId,
             definition_section_id: "sec-group",
             parent_group_item_id: null,
             position: 0,
@@ -427,6 +432,111 @@ describe("POST /api/v1/technical-jobs/:id/group-items", () => {
     );
     expect(res.status).toBe(201);
     expect(capturedAudit).toMatchObject({ p_action: "group_item.created" });
+  });
+
+  // Task 15.5A: parentGroupItemId was removed as independent input --
+  // it is always derived server-side from the container's own
+  // groupItemId. A client-supplied value must be rejected outright
+  // (unknown-key stripping alone wouldn't prove the field can no
+  // longer smuggle a mismatched parent into the RPC call).
+  it("does not forward a client-supplied parentGroupItemId to add_group_item() -- the parameter no longer exists", async () => {
+    let capturedRpcBody: Record<string, unknown> | undefined;
+    stubFetch({
+      membership: membershipHandler("owner"),
+      addGroupItemRpc: (init) => {
+        capturedRpcBody = JSON.parse(init.body as string);
+        return new Response(
+          JSON.stringify({
+            id: "e0000000-0000-0000-0000-000000000001",
+            organization_id: orgId,
+            technical_job_id: jobId,
+            container_node_id: nodeId,
+            definition_section_id: "sec-group",
+            parent_group_item_id: "f0000000-0000-0000-0000-000000000009",
+            position: 0,
+            state: "active",
+            created_at: "2026-09-15T00:00:00.000Z",
+            updated_at: "2026-09-15T00:00:00.000Z"
+          }),
+          { status: 200 }
+        );
+      }
+    });
+    const res = await app.request(
+      `/api/v1/technical-jobs/${jobId}/group-items?organizationId=${orgId}`,
+      {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          containerNodeId: nodeId,
+          parentGroupItemId: "f0000000-0000-0000-0000-000000000009"
+        })
+      },
+      env
+    );
+    expect(res.status).toBe(201);
+    expect(capturedRpcBody).toEqual({
+      p_organization_id: orgId,
+      p_technical_job_id: jobId,
+      p_container_node_id: nodeId
+    });
+  });
+});
+
+describe("POST /api/v1/technical-jobs/:id/group-items/reorder", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("returns 422 when the ordered id list doesn't match the container's current active children", async () => {
+    stubFetch({
+      membership: membershipHandler("owner"),
+      reorderGroupItemsRpc: () =>
+        new Response(JSON.stringify({ code: "22023", message: "mismatch" }), { status: 400 })
+    });
+    const groupItemId = "e0000000-0000-0000-0000-000000000001";
+    const res = await app.request(
+      `/api/v1/technical-jobs/${jobId}/group-items/reorder?organizationId=${orgId}`,
+      {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({ containerNodeId: nodeId, orderedGroupItemIds: [groupItemId] })
+      },
+      env
+    );
+    expect(res.status).toBe(422);
+  });
+
+  it("succeeds and audits the GroupItem reorder", async () => {
+    let capturedRpcBody: Record<string, unknown> | undefined;
+    let capturedAudit: Record<string, unknown> | undefined;
+    stubFetch({
+      membership: membershipHandler("inspector"),
+      reorderGroupItemsRpc: (init) => {
+        capturedRpcBody = JSON.parse(init.body as string);
+        return new Response(null, { status: 204 });
+      },
+      auditRpc: (init) => {
+        capturedAudit = JSON.parse(init.body as string);
+        return new Response(JSON.stringify({ id: "audit-event-1" }), { status: 200 });
+      }
+    });
+    const groupItemId = "e0000000-0000-0000-0000-000000000001";
+    const res = await app.request(
+      `/api/v1/technical-jobs/${jobId}/group-items/reorder?organizationId=${orgId}`,
+      {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({ containerNodeId: nodeId, orderedGroupItemIds: [groupItemId] })
+      },
+      env
+    );
+    expect(res.status).toBe(200);
+    expect(capturedRpcBody).toMatchObject({
+      p_organization_id: orgId,
+      p_technical_job_id: jobId,
+      p_container_node_id: nodeId,
+      p_ordered_group_item_ids: [groupItemId]
+    });
+    expect(capturedAudit).toMatchObject({ p_action: "group_item.reordered" });
   });
 });
 

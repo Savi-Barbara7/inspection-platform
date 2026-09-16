@@ -34,6 +34,7 @@ export type AuditAction =
   | "group_item.created"
   | "group_item.updated"
   | "group_item.archived"
+  | "group_item.reordered"
   | "job_runtime_value.created"
   | "job_runtime_value.overridden"
   | "job_runtime_value.override_removed"

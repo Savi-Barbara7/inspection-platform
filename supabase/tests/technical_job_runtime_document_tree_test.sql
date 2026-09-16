@@ -125,7 +125,7 @@ select throws_ok(
   '42501', null, 'anon cannot call materialize_technical_job()'
 );
 select throws_ok(
-  $$ select public.add_group_item('f0000000-0000-0000-0000-000000000001', gen_random_uuid(), gen_random_uuid(), null) $$,
+  $$ select public.add_group_item('f0000000-0000-0000-0000-000000000001', gen_random_uuid(), gen_random_uuid()) $$,
   '42501', null, 'anon cannot call add_group_item()'
 );
 select throws_ok(
@@ -256,8 +256,7 @@ select lives_ok(
   $$ select public.add_group_item(
        'f0000000-0000-0000-0000-000000000001',
        (select id from public.technical_jobs where organization_id = 'f0000000-0000-0000-0000-000000000001' and name = 'Job A'),
-       (select id from public.runtime_nodes where technical_job_id = (select id from public.technical_jobs where organization_id = 'f0000000-0000-0000-0000-000000000001' and name = 'Job A') and definition_id = 'sec-group'),
-       null
+       (select id from public.runtime_nodes where technical_job_id = (select id from public.technical_jobs where organization_id = 'f0000000-0000-0000-0000-000000000001' and name = 'Job A') and definition_id = 'sec-group')
      ) $$,
   '9. add_group_item() creates the first GroupItem'
 );
@@ -266,8 +265,7 @@ select lives_ok(
   $$ select public.add_group_item(
        'f0000000-0000-0000-0000-000000000001',
        (select id from public.technical_jobs where organization_id = 'f0000000-0000-0000-0000-000000000001' and name = 'Job A'),
-       (select id from public.runtime_nodes where technical_job_id = (select id from public.technical_jobs where organization_id = 'f0000000-0000-0000-0000-000000000001' and name = 'Job A') and definition_id = 'sec-group'),
-       null
+       (select id from public.runtime_nodes where technical_job_id = (select id from public.technical_jobs where organization_id = 'f0000000-0000-0000-0000-000000000001' and name = 'Job A') and definition_id = 'sec-group')
      ) $$,
   '9. add_group_item() creates a second, sibling GroupItem'
 );

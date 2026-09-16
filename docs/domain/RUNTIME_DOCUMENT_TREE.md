@@ -102,23 +102,29 @@ pra ele — o mesmo `definitionId` ("blk-nome-da-area", por exemplo) aparece
 em cada item, mas com um `id` de runtime **diferente e independente** a
 cada vez. Zero colisão.
 
-GroupItems podem ser aninhados (`parentGroupItemId`) — um RepeatableGroup
-dentro de outro (ex.: "Edificações" → "Ambientes") — respeitando o mesmo
-`MAX_SECTION_DEPTH` que toda seção já respeita. Não existe um limite de
-aninhamento separado para grupos repetíveis.
+GroupItems podem ser aninhados — um RepeatableGroup dentro de outro (ex.:
+"Edificações" → "Ambientes") — respeitando o mesmo `MAX_SECTION_DEPTH`
+que toda seção já respeita. Não existe um limite de aninhamento separado
+para grupos repetíveis. Nesting só suporta um único pai por item (sem
+suporte a múltiplos pais).
 
-> **Correção pós-Task 15 (revisão de integridade):** o parágrafo acima
-> descreve o caminho feliz testado (materialização + um item por nível).
-> Uma revisão posterior encontrou que `duplicate_group_item()` reencontra
-> o nó container de um item aninhado por uma busca ambígua (`definition_id`
-> sem escopo por `group_item_id`), podendo clonar a subárvore errada
-> quando existe mais de um item externo, e que `add_group_item()` nunca
-> valida que o container informado pertence de fato ao
-> `parent_group_item_id` informado. Nesting também só suporta um único
-> pai por item hoje (sem suporte a múltiplos pais). Ver Task 15.5A em
-> `docs/product/ROADMAP_TASKS_V2.md` — nenhum desses bugs foi corrigido
-> ainda; esta nota existe para que este documento não implique uma
-> garantia que o código não cumpre.
+> **Task 15.5A — Runtime Tree Integrity (implementada):** um
+> RepeatableGroup aninhado materializa **um `RuntimeNode` container novo
+> por instância do grupo externo** — "Edificação A" e "Edificação B" cada
+> uma tem seu próprio container "Ambientes", e os dois compartilham o
+> mesmo `definitionSectionId` ("sec-inner"). Antes desta task, o código
+> reencontrava "o" container de um `GroupItem` buscando por
+> `definitionSectionId` — ambíguo sempre que mais de um container assim
+> existisse, podendo atribuir/clonar a subárvore errada. A correção
+> adiciona `GroupItem.containerNodeId`: a referência única e autoritativa
+> ao `RuntimeNode` exato daquele item — nunca mais re-derivada por busca.
+> `parentGroupItemId` deixou de ser aceito como input independente em
+> `add_group_item()` (era exatamente como um container de um pai podia
+> ser combinado com um `parentGroupItemId` de outro) — agora é sempre
+> **derivado no servidor** a partir do próprio `container_node_id`
+> (`runtime_nodes.group_item_id`), eliminando essa classe de bug
+> estruturalmente em vez de apenas validá-la. Migration:
+> `20260915040000_task_15_5a_runtime_tree_integrity.sql`.
 
 ## GroupItem como DataBinding source (fechando o débito da Task 13)
 
@@ -168,18 +174,43 @@ partir de uma lista ordenada de ids explícita — e rejeita qualquer lista
 que não corresponda exatamente ao conjunto atual de filhos (nunca
 permite "esquecer" ou "inventar" um irmão). Os ids nunca mudam.
 
+`reorder_group_items()` (Task 15.5A) é o mesmo contrato para GroupItems:
+escopado por `container_node_id` (que sozinho já identifica o conjunto de
+irmãos — sem precisar de um segundo parâmetro "qual pai", diferente do
+reorder de RuntimeNode). Reatribui posição em duas fases dentro da
+transação (desloca todo o conjunto para fora da faixa `[0, N)` antes de
+atribuir os valores finais) porque o índice único parcial
+`(container_node_id, position) WHERE state='active'` é verificado por
+statement, não é deferrable (índice parcial não pode virar constraint
+deferrable) — atribuir posições finais uma a uma sem essa fase
+intermediária colidiria consigo mesmo ao trocar dois itens de lugar.
+
 ## Duplicar e arquivar
 
 `duplicate_group_item()` clona a subárvore de UM GroupItem com ids
 inteiramente novos (GroupItem + cada RuntimeNode) — nunca reaproveita os
 originais. Não propaga para GroupItems aninhados (um RepeatableGroup
-dentro do item duplicado) — isso é uma fronteira deliberada, documentada,
-não um esquecimento.
+dentro do item duplicado fica com seu próprio container novo, vazio) —
+isso é uma fronteira deliberada, documentada, não um esquecimento; também
+não copia `JobRuntimeValue`s. Resolve seu próprio container via
+`container_node_id` diretamente (Task 15.5A) — nunca mais por busca
+ambígua — e trava essa linha (`FOR UPDATE`) antes de calcular a posição
+do clone, fechando uma lacuna de concorrência que existia entre
+`duplicate_group_item()` e `add_group_item()` concorrentes sob o mesmo
+container (este último já travava; aquele não).
 
 Arquivar (`PATCH /group-items/:id {state:"archived"}`) nunca deleta
 fisicamente — some da árvore padrão (`buildDocumentTree()` filtra por
-padrão), mas continua acessível com `includeArchived=true` e pode ser
-restaurado (`state:"active"`).
+padrão), mas continua acessível com `includeArchived=true`.
+
+Restaurar (`PATCH /group-items/:id {state:"active"}`) vai sempre por
+`restore_group_item()` (Task 15.5A) — nunca um PATCH direto na coluna:
+recalcula uma posição **nova**, ao final da lista de irmãos ativos, em
+vez de tentar reaproveitar a posição antiga do item. Isso fecha o
+cenário exato que motivou essa task: item na posição 1 → arquivado →
+um item novo assume a posição 1 → o item arquivado é restaurado — sem a
+posição recalculada, ele colidiria com o item novo. Restaurar um item já
+ativo é um no-op idempotente (retorna o item sem mudar nada).
 
 ## Document Tree — shape de leitura, nunca um blob armazenado
 
@@ -200,11 +231,18 @@ GET    /api/v1/technical-jobs?organizationId=
 GET    /api/v1/technical-jobs/:id?organizationId=        → {job, sourceAssignments}
 PATCH  /api/v1/technical-jobs/:id?organizationId=         {name?, status?, responsibleProfessionalId?}
 GET    /api/v1/technical-jobs/:id/document-tree?organizationId=&includeArchived=
-POST   /api/v1/technical-jobs/:id/group-items?organizationId= {containerNodeId, parentGroupItemId?}
+POST   /api/v1/technical-jobs/:id/group-items?organizationId= {containerNodeId}
 POST   /api/v1/technical-jobs/:id/reorder?organizationId=  {parentNodeId, groupItemId, orderedNodeIds[]}
+POST   /api/v1/technical-jobs/:id/group-items/reorder?organizationId=  {containerNodeId, orderedGroupItemIds[]}
 PATCH  /api/v1/group-items/:id?organizationId=&technicalJobId=  {state}
 POST   /api/v1/group-items/:id/duplicate?organizationId=&technicalJobId=
 ```
+
+`containerNodeId` sozinho basta para adicionar/reordenar um GroupItem
+(Task 15.5A) — `parentGroupItemId` não é mais aceito como input: é sempre
+derivado no servidor a partir do próprio container. `PATCH {state:"active"}`
+sobre um GroupItem arquivado dispara `restore_group_item()` internamente
+(posição recalculada) — nunca um PATCH cru na coluna `state`.
 
 Nenhum endpoint por tipo de bloco. `organizationId`/`technicalJobId` como
 query params obrigatórios em recursos de topo, nunca aninhados no path —

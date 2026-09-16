@@ -36,7 +36,7 @@ function node(
 }
 
 function groupItem(
-  overrides: Partial<GroupItem> & Pick<GroupItem, "id" | "definitionSectionId">
+  overrides: Partial<GroupItem> & Pick<GroupItem, "id" | "definitionSectionId" | "containerNodeId">
 ): GroupItem {
   return {
     organizationId: "org-1",
@@ -301,8 +301,8 @@ describe("buildDocumentTree() — pure assembly from flat RuntimeNode/GroupItem 
       })
     ];
     const groupItems: GroupItem[] = [
-      groupItem({ id: "gi-a", definitionSectionId: "sec-group", position: 0 }),
-      groupItem({ id: "gi-b", definitionSectionId: "sec-group", position: 1 })
+      groupItem({ id: "gi-a", definitionSectionId: "sec-group", containerNodeId: "n-group", position: 0 }),
+      groupItem({ id: "gi-b", definitionSectionId: "sec-group", containerNodeId: "n-group", position: 1 })
     ];
     const tree = buildDocumentTree(nodes, groupItems);
     expect(tree).toHaveLength(1);
@@ -349,10 +349,16 @@ describe("buildDocumentTree() — pure assembly from flat RuntimeNode/GroupItem 
       })
     ];
     const groupItems: GroupItem[] = [
-      groupItem({ id: "gi-outer-1", definitionSectionId: "sec-outer", position: 0 }),
+      groupItem({
+        id: "gi-outer-1",
+        definitionSectionId: "sec-outer",
+        containerNodeId: "n-outer",
+        position: 0
+      }),
       groupItem({
         id: "gi-inner-1",
         definitionSectionId: "sec-inner",
+        containerNodeId: "n-inner-container",
         parentGroupItemId: "gi-outer-1",
         position: 0
       })
@@ -367,6 +373,109 @@ describe("buildDocumentTree() — pure assembly from flat RuntimeNode/GroupItem 
     expect(innerContainer.groupItems![0]!.children[0]!.id).toBe("n-inner-detail");
   });
 
+  it("Task 15.5A regression: TWO external GroupItems, each with its OWN nested container sharing the same definitionSectionId — zero collision between their inner items", () => {
+    // This is the exact scenario the pre-15.5A bug got wrong: outer group
+    // "sec-outer" has two instances (gi-outer-1, gi-outer-2), each
+    // materializing its OWN "sec-inner" container node. Before
+    // `containerNodeId` existed, `groupItemToTreeNode()` located "the"
+    // inner container by searching `nodes` for a node matching
+    // `definitionSectionId === "sec-inner"` and returned whichever one
+    // `.find()` reached first for BOTH outer items — silently merging or
+    // misattributing inner items across outer instances.
+    const nodes: RuntimeNode[] = [
+      node({
+        id: "n-outer-1",
+        definitionId: "sec-outer",
+        definitionKind: "section",
+        blockType: null,
+        isRepeatableContainer: true,
+        position: 0
+      }),
+      node({
+        id: "n-inner-container-1",
+        definitionId: "sec-inner",
+        definitionKind: "section",
+        blockType: null,
+        isRepeatableContainer: true,
+        parentNodeId: "n-outer-1",
+        groupItemId: "gi-outer-1",
+        position: 0
+      }),
+      node({
+        id: "n-inner-detail-1",
+        definitionId: "sec-inner-detail",
+        definitionKind: "section",
+        blockType: null,
+        parentNodeId: "n-inner-container-1",
+        groupItemId: "gi-inner-1",
+        position: 0
+      }),
+      node({
+        id: "n-inner-container-2",
+        definitionId: "sec-inner",
+        definitionKind: "section",
+        blockType: null,
+        isRepeatableContainer: true,
+        parentNodeId: "n-outer-1",
+        groupItemId: "gi-outer-2",
+        position: 0
+      }),
+      node({
+        id: "n-inner-detail-2",
+        definitionId: "sec-inner-detail",
+        definitionKind: "section",
+        blockType: null,
+        parentNodeId: "n-inner-container-2",
+        groupItemId: "gi-inner-2",
+        position: 0
+      })
+    ];
+    const groupItems: GroupItem[] = [
+      groupItem({
+        id: "gi-outer-1",
+        definitionSectionId: "sec-outer",
+        containerNodeId: "n-outer-1",
+        position: 0
+      }),
+      groupItem({
+        id: "gi-outer-2",
+        definitionSectionId: "sec-outer",
+        containerNodeId: "n-outer-1",
+        position: 1
+      }),
+      groupItem({
+        id: "gi-inner-1",
+        definitionSectionId: "sec-inner",
+        containerNodeId: "n-inner-container-1",
+        parentGroupItemId: "gi-outer-1",
+        position: 0
+      }),
+      groupItem({
+        id: "gi-inner-2",
+        definitionSectionId: "sec-inner",
+        containerNodeId: "n-inner-container-2",
+        parentGroupItemId: "gi-outer-2",
+        position: 0
+      })
+    ];
+
+    const tree = buildDocumentTree(nodes, groupItems);
+    const outer1 = tree[0]!.groupItems!.find((gi) => gi.id === "gi-outer-1")!;
+    const outer2 = tree[0]!.groupItems!.find((gi) => gi.id === "gi-outer-2")!;
+
+    const innerContainer1 = outer1.children[0]!;
+    const innerContainer2 = outer2.children[0]!;
+    expect(innerContainer1.id).toBe("n-inner-container-1");
+    expect(innerContainer2.id).toBe("n-inner-container-2");
+
+    // Each outer item's own inner container carries ONLY its own inner
+    // item — never the other outer item's.
+    expect(innerContainer1.groupItems!.map((gi) => gi.id)).toEqual(["gi-inner-1"]);
+    expect(innerContainer2.groupItems!.map((gi) => gi.id)).toEqual(["gi-inner-2"]);
+    expect(innerContainer1.groupItems![0]!.children[0]!.id).toBe("n-inner-detail-1");
+    expect(innerContainer2.groupItems![0]!.children[0]!.id).toBe("n-inner-detail-2");
+  });
+
   it("19. an archived GroupItem is excluded from the default tree but included with includeArchived:true — never physically dropped from the data", () => {
     const nodes: RuntimeNode[] = [
       node({
@@ -379,8 +488,20 @@ describe("buildDocumentTree() — pure assembly from flat RuntimeNode/GroupItem 
       })
     ];
     const groupItems: GroupItem[] = [
-      groupItem({ id: "gi-a", definitionSectionId: "sec-group", position: 0, state: "active" }),
-      groupItem({ id: "gi-b", definitionSectionId: "sec-group", position: 1, state: "archived" })
+      groupItem({
+        id: "gi-a",
+        definitionSectionId: "sec-group",
+        containerNodeId: "n-group",
+        position: 0,
+        state: "active"
+      }),
+      groupItem({
+        id: "gi-b",
+        definitionSectionId: "sec-group",
+        containerNodeId: "n-group",
+        position: 1,
+        state: "archived"
+      })
     ];
     const defaultTree = buildDocumentTree(nodes, groupItems);
     expect(defaultTree[0]!.groupItems!.map((gi) => gi.id)).toEqual(["gi-a"]);
@@ -466,5 +587,108 @@ describe("Section type accepts the same generic `repeatable` shape regardless of
     expect(planA[0]!.isRepeatableContainer).toBe(true);
     expect(planB[0]!.isRepeatableContainer).toBe(true);
     expect(planA[0]!.children).toEqual(planB[0]!.children);
+  });
+});
+
+describe("Task 15.5A section 13: performance envelope — a guard, not an optimization", () => {
+  it("buildDocumentTree() stays well within a sane time budget for ~500 RuntimeNodes and hundreds of nested GroupItems", () => {
+    // A top-level non-repeatable section holding a flat block, plus a
+    // top-level repeatable "Edificação" section whose OWN nested
+    // repeatable "Ambiente" section is the exact shape this task fixed
+    // (Task 15.5A section 2): each outer GroupItem materializes its own
+    // inner container node, so many outer items means many inner
+    // containers all sharing one definitionSectionId. This exercises
+    // nodeToTreeNode()/groupItemToTreeNode() at realistic scale without
+    // asserting any specific algorithmic complexity -- only that
+    // assembly time stays sane, guarding against an obviously
+    // quadratic-or-worse regression, not chasing microseconds.
+    const nodes: RuntimeNode[] = [
+      node({ id: "n-flat", definitionId: "sec-flat", parentNodeId: null, position: 0 }),
+      node({
+        id: "n-outer-container",
+        definitionId: "sec-outer",
+        definitionKind: "section",
+        blockType: null,
+        parentNodeId: null,
+        isRepeatableContainer: true,
+        position: 1
+      })
+    ];
+    const groupItems: GroupItem[] = [];
+
+    const OUTER_COUNT = 150;
+    const INNER_PER_OUTER = 3;
+    for (let i = 0; i < OUTER_COUNT; i++) {
+      const outerId = `gi-outer-${i}`;
+      const innerContainerId = `n-inner-container-${i}`;
+      groupItems.push(
+        groupItem({
+          id: outerId,
+          definitionSectionId: "sec-outer",
+          containerNodeId: "n-outer-container",
+          position: i
+        })
+      );
+      nodes.push(
+        node({
+          id: innerContainerId,
+          definitionId: "sec-inner",
+          definitionKind: "section",
+          blockType: null,
+          parentNodeId: "n-outer-container",
+          groupItemId: outerId,
+          isRepeatableContainer: true,
+          position: 0
+        })
+      );
+      for (let j = 0; j < INNER_PER_OUTER; j++) {
+        const innerId = `gi-inner-${i}-${j}`;
+        groupItems.push(
+          groupItem({
+            id: innerId,
+            definitionSectionId: "sec-inner",
+            containerNodeId: innerContainerId,
+            parentGroupItemId: outerId,
+            position: j
+          })
+        );
+        nodes.push(
+          node({
+            id: `n-inner-detail-${i}-${j}`,
+            definitionId: "blk-inner-detail",
+            parentNodeId: innerContainerId,
+            groupItemId: innerId,
+            position: 0
+          })
+        );
+      }
+    }
+
+    // 2 base nodes + 150 * (1 inner container + 3 detail nodes) = 602
+    // RuntimeNodes; 150 outer + 150*3 inner = 600 GroupItems.
+    expect(nodes.length).toBeGreaterThanOrEqual(500);
+    expect(groupItems.length).toBeGreaterThanOrEqual(400);
+
+    const start = performance.now();
+    const tree = buildDocumentTree(nodes, groupItems);
+    const elapsedMs = performance.now() - start;
+
+    // Generous budget for CI-noise tolerance -- this is a guard against
+    // an obviously bad architecture (e.g. accidental O(n^3) or repeated
+    // full-array rescans per recursion level), not a tight perf
+    // assertion. A healthy O(n^2)-ish assembly over ~1000 combined rows
+    // finishes in low single-digit milliseconds locally.
+    expect(elapsedMs).toBeLessThan(1000);
+
+    // Correctness at scale, not just speed: every outer item's own
+    // inner container holds exactly its own inner items -- zero
+    // cross-contamination even at 150 sibling containers sharing one
+    // definitionSectionId.
+    const outerSection = tree.find((n) => n.definitionId === "sec-outer")!;
+    expect(outerSection.groupItems).toHaveLength(OUTER_COUNT);
+    for (const outerTreeItem of outerSection.groupItems!) {
+      const innerContainer = outerTreeItem.children[0]!;
+      expect(innerContainer.groupItems).toHaveLength(INNER_PER_OUTER);
+    }
   });
 });

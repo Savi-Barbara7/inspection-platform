@@ -9,6 +9,7 @@ import {
   type DocumentTreeNode,
   type GroupItem,
   type GroupItemState,
+  type ReorderGroupItemsInput,
   type ReorderRuntimeNodesInput,
   type RuntimeDocumentTreeRepository,
   type RuntimeNode,
@@ -35,6 +36,7 @@ type GroupItemRow = {
   id: string;
   organization_id: string;
   technical_job_id: string;
+  container_node_id: string;
   definition_section_id: string;
   parent_group_item_id: string | null;
   position: number;
@@ -66,6 +68,7 @@ function toGroupItem(row: GroupItemRow): GroupItem {
     id: row.id,
     organizationId: row.organization_id,
     technicalJobId: row.technical_job_id,
+    containerNodeId: row.container_node_id,
     definitionSectionId: row.definition_section_id,
     parentGroupItemId: row.parent_group_item_id,
     position: row.position,
@@ -159,8 +162,7 @@ export function createSupabaseRuntimeDocumentTreeRepository(
         body: JSON.stringify({
           p_organization_id: organizationId,
           p_technical_job_id: technicalJobId,
-          p_container_node_id: input.containerNodeId,
-          p_parent_group_item_id: input.parentGroupItemId ?? null
+          p_container_node_id: input.containerNodeId
         })
       });
       if (!response.ok) {
@@ -203,6 +205,32 @@ export function createSupabaseRuntimeDocumentTreeRepository(
       groupItemId,
       state
     ): Promise<GroupItem | null> {
+      // Restoring to "active" always goes through restore_group_item():
+      // it must recompute a fresh, non-colliding position (Task 15.5A)
+      // rather than reclaiming whatever position this row still holds
+      // from before it was archived, which a plain PATCH would do and
+      // which can collide with a position a newer sibling has since
+      // taken. Archiving stays a plain PATCH -- it never needs to
+      // preserve position uniqueness (the item simply leaves the active
+      // set).
+      if (state === "active") {
+        const response = await fetch(`${supabaseUrl}/rest/v1/rpc/restore_group_item`, {
+          method: "POST",
+          headers: headers(authToken, { Accept: "application/vnd.pgrst.object+json" }),
+          body: JSON.stringify({
+            p_organization_id: organizationId,
+            p_technical_job_id: technicalJobId,
+            p_group_item_id: groupItemId
+          })
+        });
+        if (!response.ok) {
+          const body: unknown = await response.json().catch(() => null);
+          if (rpcErrorCode(body) === "P0002") return null;
+          throw new Error(`restore group item failed with status ${response.status}`);
+        }
+        return toGroupItem((await response.json()) as GroupItemRow);
+      }
+
       const response = await fetch(
         `${supabaseUrl}/rest/v1/group_items?id=eq.${groupItemId}&organization_id=eq.${organizationId}&technical_job_id=eq.${technicalJobId}`,
         {
@@ -217,6 +245,53 @@ export function createSupabaseRuntimeDocumentTreeRepository(
       if (response.status === 406 || response.status === 404) return null;
       if (!response.ok) {
         throw new Error(`update group item state failed with status ${response.status}`);
+      }
+      return toGroupItem((await response.json()) as GroupItemRow);
+    },
+
+    async reorderGroupItems(
+      authToken,
+      organizationId,
+      technicalJobId,
+      input: ReorderGroupItemsInput
+    ): Promise<void> {
+      const response = await fetch(`${supabaseUrl}/rest/v1/rpc/reorder_group_items`, {
+        method: "POST",
+        headers: headers(authToken),
+        body: JSON.stringify({
+          p_organization_id: organizationId,
+          p_technical_job_id: technicalJobId,
+          p_container_node_id: input.containerNodeId,
+          p_ordered_group_item_ids: input.orderedGroupItemIds
+        })
+      });
+      if (!response.ok) {
+        const body: unknown = await response.json().catch(() => null);
+        if (rpcErrorCode(body) === "22023") throw new ReorderMismatchError();
+        if (rpcErrorCode(body) === "P0002") throw new RuntimeNodeNotFoundError(input.containerNodeId);
+        throw new Error(`reorder group items failed with status ${response.status}`);
+      }
+    },
+
+    async restoreGroupItem(
+      authToken,
+      organizationId,
+      technicalJobId,
+      groupItemId
+    ): Promise<GroupItem | null> {
+      const response = await fetch(`${supabaseUrl}/rest/v1/rpc/restore_group_item`, {
+        method: "POST",
+        headers: headers(authToken, { Accept: "application/vnd.pgrst.object+json" }),
+        body: JSON.stringify({
+          p_organization_id: organizationId,
+          p_technical_job_id: technicalJobId,
+          p_group_item_id: groupItemId
+        })
+      });
+      if (!response.ok) {
+        const body: unknown = await response.json().catch(() => null);
+        if (rpcErrorCode(body) === "P0002") return null;
+        throw new Error(`restore group item failed with status ${response.status}`);
       }
       return toGroupItem((await response.json()) as GroupItemRow);
     },

@@ -188,9 +188,29 @@ export interface GroupItem {
   id: string;
   organizationId: string;
   technicalJobId: string;
-  /** The repeatable Section's own id this instance was created from. */
+  /**
+   * The exact RuntimeNode (a repeatable container) this item structurally
+   * belongs to — Task 15.5A's fix for the identity bug documented in
+   * `docs/product/ROADMAP_TASKS_V2.md` (Task 15.5A): a nested
+   * RepeatableGroup materializes ONE fresh container node per enclosing
+   * GroupItem, so more than one container can share the same
+   * `definitionSectionId` at once. `containerNodeId` is the single
+   * authoritative reference — never re-derived by searching for "a" node
+   * matching `definitionSectionId` (that search is exactly what was
+   * ambiguous). Always set by the server (`add_group_item()`/
+   * `duplicate_group_item()`), never accepted as client input.
+   */
+  containerNodeId: string;
+  /** The repeatable Section's own id this instance was created from — display/query convenience, never used alone to resolve which container a GroupItem belongs to (use `containerNodeId`). */
   definitionSectionId: string;
-  /** Set when this item belongs to a RepeatableGroup nested inside another RepeatableGroup's own item. */
+  /**
+   * Set when this item belongs to a RepeatableGroup nested inside
+   * another RepeatableGroup's own item. Always DERIVED from
+   * `containerNodeId`'s own `RuntimeNode.groupItemId` server-side —
+   * never accepted as independent client input, so it can never
+   * disagree with the container it's actually materialized under
+   * (Task 15.5A closes exactly this "container ↔ parent" gap).
+   */
   parentGroupItemId: string | null;
   position: number;
   state: GroupItemState;
@@ -265,13 +285,13 @@ function nodeToTreeNode(
   };
 
   if (node.isRepeatableContainer) {
+    // Task 15.5A fix: scope by `containerNodeId === node.id` — the exact,
+    // unambiguous runtime container — never by `definitionSectionId`
+    // (which a nested RepeatableGroup can share across several distinct
+    // container instances, one per enclosing GroupItem) nor by
+    // `enclosingGroupItemId` alone.
     base.groupItems = groupItems
-      .filter(
-        (gi) =>
-          gi.definitionSectionId === node.definitionId &&
-          gi.parentGroupItemId === enclosingGroupItemId &&
-          (includeArchived || gi.state !== "archived")
-      )
+      .filter((gi) => gi.containerNodeId === node.id && (includeArchived || gi.state !== "archived"))
       .sort((a, b) => a.position - b.position)
       .map((gi) => groupItemToTreeNode(gi, nodes, groupItems, includeArchived));
     return base;
@@ -290,15 +310,16 @@ function groupItemToTreeNode(
   groupItems: readonly GroupItem[],
   includeArchived: boolean
 ): DocumentTreeGroupItem {
-  const containerNode = nodes.find(
-    (n) => n.definitionId === groupItem.definitionSectionId && n.isRepeatableContainer
-  );
-  const children = containerNode
-    ? nodes
-        .filter((n) => n.parentNodeId === containerNode.id && n.groupItemId === groupItem.id)
-        .sort((a, b) => a.position - b.position)
-        .map((n) => nodeToTreeNode(n, nodes, groupItems, groupItem.id, includeArchived))
-    : [];
+  // Task 15.5A fix: `groupItem.containerNodeId` is the exact runtime node
+  // this item's own subtree is materialized under — no more searching
+  // `nodes` for "a" node matching `definitionSectionId`, which used to
+  // silently pick whichever container `.find()` happened to reach first
+  // whenever a nested RepeatableGroup produced more than one container
+  // sharing that same `definitionSectionId` (one per enclosing GroupItem).
+  const children = nodes
+    .filter((n) => n.parentNodeId === groupItem.containerNodeId && n.groupItemId === groupItem.id)
+    .sort((a, b) => a.position - b.position)
+    .map((n) => nodeToTreeNode(n, nodes, groupItems, groupItem.id, includeArchived));
   return {
     id: groupItem.id,
     position: groupItem.position,
@@ -361,14 +382,36 @@ export class ReorderMismatchError extends Error {
 }
 
 export interface AddGroupItemInput {
+  /**
+   * The repeatable-container RuntimeNode to add an item under. That's
+   * the only input needed — Task 15.5A removed the separate
+   * `parentGroupItemId` parameter this used to accept: the parent is
+   * always the container's own (server-known) `groupItemId`, derived
+   * automatically, never supplied independently. Supplying it
+   * separately was exactly how a caller could smuggle a container from
+   * one parent's subtree together with a `parentGroupItemId` pointing
+   * at an unrelated sibling parent; removing the parameter removes the
+   * bug class structurally instead of just validating against it.
+   */
   containerNodeId: string;
-  parentGroupItemId?: string | undefined;
 }
 
 export interface ReorderRuntimeNodesInput {
   parentNodeId: string | null;
   groupItemId: string | null;
   orderedNodeIds: string[];
+}
+
+/**
+ * `containerNodeId` alone fully scopes the sibling set to reorder: a
+ * nested RepeatableGroup's container is always specific to exactly one
+ * enclosing GroupItem instance (never shared), so there is no need for
+ * a separate "which parent" parameter the way `AddGroupItemInput` used
+ * to (mis)require one either.
+ */
+export interface ReorderGroupItemsInput {
+  containerNodeId: string;
+  orderedGroupItemIds: string[];
 }
 
 /**
@@ -419,4 +462,30 @@ export interface RuntimeDocumentTreeRepository {
     nodeId: string,
     state: RuntimeNodeState
   ): Promise<RuntimeNode | null>;
+  /**
+   * Reassigns position for every active GroupItem under one container —
+   * ids never change (Task 15.5A, mirrors `reorderNodes()` for
+   * `RuntimeNode`s). Throws `ReorderMismatchError` when the ordered id
+   * list doesn't exactly match the container's current active children.
+   */
+  reorderGroupItems(
+    authToken: string,
+    organizationId: string,
+    technicalJobId: string,
+    input: ReorderGroupItemsInput
+  ): Promise<void>;
+  /**
+   * Restores an archived GroupItem with a freshly computed, always-valid
+   * position at the end of its container's active list (Task 15.5A) —
+   * never tries to reclaim its old slot, which could otherwise collide
+   * with a position a newer item took while this one was archived.
+   * Restoring an already-active item is a no-op that returns it
+   * unchanged.
+   */
+  restoreGroupItem(
+    authToken: string,
+    organizationId: string,
+    technicalJobId: string,
+    groupItemId: string
+  ): Promise<GroupItem | null>;
 }
