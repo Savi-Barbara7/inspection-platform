@@ -12,7 +12,7 @@
 -- (not just deprecated). Fictitious fixtures only.
 
 begin;
-select plan(37);
+select plan(51);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures: Org A (owner) and Org B (owner), each with one Customer.
@@ -293,7 +293,10 @@ select is(
 );
 
 -- ---------------------------------------------------------------------------
--- 5/6. Cross-job / cross-tenant container rejection.
+-- 5/6. Cross-job / cross-tenant container rejection. Org B needs a REAL,
+-- fully independent job of its own -- its own model, its own published
+-- version, its own materialized tree -- not a gen_random_uuid()
+-- standing in for "some other job" (red-team finding #7).
 -- ---------------------------------------------------------------------------
 
 select lives_ok(
@@ -312,26 +315,73 @@ select throws_ok(
     (select id from public.runtime_nodes where technical_job_id = (select id from public.technical_jobs where organization_id = 'a0000000-0000-0000-0000-000000000001' and name = 'Job A') and definition_id = 'sec-outer')
   ),
   'P0002', null,
-  '5. a container node from Job A is rejected when adding a GroupItem under Job B'
+  '5. a container node from Job A is rejected when adding a GroupItem under Job B (same org, different job)'
 );
 
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-a00000000002","role":"authenticated"}', true);
 
+select lives_ok(
+  $$ select public.derive_organization_model(
+       'a0000000-0000-0000-0000-000000000002',
+       (select id from public.technical_models where slug = 'building-inspection'),
+       null
+     ) $$,
+  'Org B derives its own, fully independent model'
+);
+
+update public.organization_model_versions
+set definition = '{"schemaVersion":1,"sections":[{"id":"sec-b-outer","title":"Org B Outer","blocks":[],"repeatable":{"labelSingular":"Item","labelPlural":"Items","fields":[]}}]}'::jsonb
+where organization_id = 'a0000000-0000-0000-0000-000000000002'
+  and status = 'draft';
+
+select lives_ok(
+  $$ select publish_organization_model_version(
+       'a0000000-0000-0000-0000-000000000002',
+       (select id from public.organization_models where organization_id = 'a0000000-0000-0000-0000-000000000002'),
+       (select id from public.organization_model_versions where organization_id = 'a0000000-0000-0000-0000-000000000002' and status = 'draft'),
+       (select updated_at from public.organization_model_versions where organization_id = 'a0000000-0000-0000-0000-000000000002' and status = 'draft'),
+       'compatible', '[]'::jsonb
+     ) $$,
+  'Org B publishes its own model'
+);
+
+select lives_ok(
+  $$ select public.materialize_technical_job(
+       'a0000000-0000-0000-0000-000000000002',
+       (select id from public.organization_models where organization_id = 'a0000000-0000-0000-0000-000000000002'),
+       'Job B-Real', null, '[]'::jsonb
+     ) $$,
+  'Org B materializes its own REAL job (Job B-Real) -- a genuine, independent tenant, not a placeholder id'
+);
+
 -- Org B is a legitimate owner of its OWN organization (has_org_role()
--- passes), but Org A's container is scoped by (organization_id,
--- technical_job_id) -- it structurally cannot be "found" under any of
--- Org B's own jobs, so this fails as "not found", not as a distinct
--- authorization error. That is the stronger property: existence of a
--- foreign container is never revealed to a caller who can't see it.
+-- passes) and has a REAL job of its own -- but Org A's container is
+-- scoped by (organization_id, technical_job_id); it structurally cannot
+-- be "found" under Job B-Real, so this fails as "not found", not as a
+-- distinct authorization error. That is the stronger property:
+-- existence of a foreign container is never revealed to a caller who
+-- can't see it.
 select throws_ok(
   format(
     $$ select public.add_group_item('a0000000-0000-0000-0000-000000000002', %L, %L) $$,
-    gen_random_uuid(),
+    (select id from public.technical_jobs where organization_id = 'a0000000-0000-0000-0000-000000000002' and name = 'Job B-Real'),
     (select id from public.runtime_nodes where technical_job_id = (select id from public.technical_jobs where organization_id = 'a0000000-0000-0000-0000-000000000001' and name = 'Job A') and definition_id = 'sec-outer')
   ),
   'P0002', null,
-  '6. Org B cannot add a GroupItem using Org A''s container -- rejected as not-found, never leaking cross-tenant existence'
+  '6. Org B (with a REAL job of its own) cannot add a GroupItem using Org A''s container -- rejected as not-found, never leaking cross-tenant existence'
+);
+
+-- Sanity: Org B's OWN container, under Org B's OWN real job, works fine
+-- -- proving the rejection above is about tenant isolation, not a
+-- broken Org B fixture.
+select lives_ok(
+  format(
+    $$ select public.add_group_item('a0000000-0000-0000-0000-000000000002', %L, %L) $$,
+    (select id from public.technical_jobs where organization_id = 'a0000000-0000-0000-0000-000000000002' and name = 'Job B-Real'),
+    (select id from public.runtime_nodes where technical_job_id = (select id from public.technical_jobs where organization_id = 'a0000000-0000-0000-0000-000000000002' and name = 'Job B-Real') and definition_id = 'sec-b-outer')
+  ),
+  '6. sanity: Org B CAN add a GroupItem using its OWN real container under its OWN real job'
 );
 
 set local role authenticated;
@@ -339,7 +389,8 @@ select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-a000000
 
 -- ---------------------------------------------------------------------------
 -- 7/8/9. Reorder GroupItems: ids never change, only position; foreign/
--- omitted/duplicated ids rejected.
+-- omitted/duplicated ids rejected; a stale expectedRevision is rejected
+-- (red-team finding #5, optimistic concurrency).
 -- ---------------------------------------------------------------------------
 
 -- Capture stable ids via psql variables (not re-derivable by position
@@ -349,6 +400,8 @@ select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-a000000
 select id as v_item0_id from public.group_items where technical_job_id = (select id from public.technical_jobs where organization_id = 'a0000000-0000-0000-0000-000000000001' and name = 'Job A') and definition_section_id = 'sec-outer' and position = 0 \gset
 select id as v_item1_id from public.group_items where technical_job_id = (select id from public.technical_jobs where organization_id = 'a0000000-0000-0000-0000-000000000001' and name = 'Job A') and definition_section_id = 'sec-outer' and position = 1 \gset
 select id as v_item2_id from public.group_items where technical_job_id = (select id from public.technical_jobs where organization_id = 'a0000000-0000-0000-0000-000000000001' and name = 'Job A') and definition_section_id = 'sec-outer' and position = 2 \gset
+select id as v_outer_container_id from public.runtime_nodes where technical_job_id = (select id from public.technical_jobs where organization_id = 'a0000000-0000-0000-0000-000000000001' and name = 'Job A') and definition_id = 'sec-outer' \gset
+select group_items_revision as v_rev_0 from public.runtime_nodes where id = :'v_outer_container_id' \gset
 
 select is(
   (select array_agg(id order by position) from public.group_items
@@ -358,14 +411,34 @@ select is(
   'sanity: three outer GroupItems exist at positions 0,1,2 before reorder'
 );
 
+-- A stale expectedRevision is rejected BEFORE any position changes --
+-- red-team finding #5's worked example: a reorder computed against an
+-- outdated view of the container must never silently apply.
+select throws_ok(
+  format(
+    $$ select public.reorder_group_items('a0000000-0000-0000-0000-000000000001', %L, %L, array[%L, %L, %L]::uuid[], %L) $$,
+    (select id from public.technical_jobs where organization_id = 'a0000000-0000-0000-0000-000000000001' and name = 'Job A'),
+    :'v_outer_container_id', :'v_item2_id', :'v_item0_id', :'v_item1_id', (:v_rev_0::int + 999)
+  ),
+  '40001', null,
+  '5. reorder_group_items() rejects a stale/wrong expectedRevision (optimistic concurrency, red-team fix) -- no position changes applied'
+);
+
+select is(
+  (select array_agg(id order by position) from public.group_items
+     where technical_job_id = (select id from public.technical_jobs where organization_id = 'a0000000-0000-0000-0000-000000000001' and name = 'Job A')
+       and definition_section_id = 'sec-outer'),
+  array[:'v_item0_id', :'v_item1_id', :'v_item2_id']::uuid[],
+  '5. the rejected reorder (bad revision) left positions completely untouched'
+);
+
 select lives_ok(
   format(
-    $$ select public.reorder_group_items('a0000000-0000-0000-0000-000000000001', %L, %L, array[%L, %L, %L]::uuid[]) $$,
+    $$ select public.reorder_group_items('a0000000-0000-0000-0000-000000000001', %L, %L, array[%L, %L, %L]::uuid[], %L) $$,
     (select id from public.technical_jobs where organization_id = 'a0000000-0000-0000-0000-000000000001' and name = 'Job A'),
-    (select id from public.runtime_nodes where technical_job_id = (select id from public.technical_jobs where organization_id = 'a0000000-0000-0000-0000-000000000001' and name = 'Job A') and definition_id = 'sec-outer'),
-    :'v_item2_id', :'v_item0_id', :'v_item1_id'
+    :'v_outer_container_id', :'v_item2_id', :'v_item0_id', :'v_item1_id', :v_rev_0
   ),
-  '7. reorder_group_items() succeeds: [Item2, Item0, Item1]'
+  '7. reorder_group_items() succeeds with the correct expectedRevision: [Item2, Item0, Item1]'
 );
 
 select is(
@@ -381,12 +454,31 @@ select is(
   '7. the item originally at position 1 (by stable id) is now at position 2'
 );
 
+select group_items_revision as v_rev_1 from public.runtime_nodes where id = :'v_outer_container_id' \gset
+
+select is(
+  :v_rev_1::int, (:v_rev_0::int + 1),
+  '5. group_items_revision was bumped by exactly 1 after the successful reorder'
+);
+
+-- Re-submitting the SAME reorder with the now-stale v_rev_0 (the value
+-- from before the successful reorder above) is rejected too -- proves
+-- the check is against the CURRENT revision, not a one-time token.
 select throws_ok(
   format(
-    $$ select public.reorder_group_items('a0000000-0000-0000-0000-000000000001', %L, %L, array[%L]::uuid[]) $$,
+    $$ select public.reorder_group_items('a0000000-0000-0000-0000-000000000001', %L, %L, array[%L, %L, %L]::uuid[], %L) $$,
     (select id from public.technical_jobs where organization_id = 'a0000000-0000-0000-0000-000000000001' and name = 'Job A'),
-    (select id from public.runtime_nodes where technical_job_id = (select id from public.technical_jobs where organization_id = 'a0000000-0000-0000-0000-000000000001' and name = 'Job A') and definition_id = 'sec-outer'),
-    (select id from public.group_items where technical_job_id = (select id from public.technical_jobs where organization_id = 'a0000000-0000-0000-0000-000000000001' and name = 'Job A') and definition_section_id = 'sec-outer' limit 1)
+    :'v_outer_container_id', :'v_item0_id', :'v_item1_id', :'v_item2_id', :v_rev_0
+  ),
+  '40001', null,
+  '5. reorder_group_items() rejects the OLD revision even in a well-formed, exact-set-matching call -- a second reorder racing against the first can never silently overwrite it'
+);
+
+select throws_ok(
+  format(
+    $$ select public.reorder_group_items('a0000000-0000-0000-0000-000000000001', %L, %L, array[%L]::uuid[], %L) $$,
+    (select id from public.technical_jobs where organization_id = 'a0000000-0000-0000-0000-000000000001' and name = 'Job A'),
+    :'v_outer_container_id', (select id from public.group_items where technical_job_id = (select id from public.technical_jobs where organization_id = 'a0000000-0000-0000-0000-000000000001' and name = 'Job A') and definition_section_id = 'sec-outer' limit 1), :v_rev_1
   ),
   '22023', null,
   '9. reorder_group_items() rejects a list that omits existing siblings'
@@ -394,25 +486,87 @@ select throws_ok(
 
 select throws_ok(
   format(
-    $$ select public.reorder_group_items('a0000000-0000-0000-0000-000000000001', %L, %L, array[%L]::uuid[]) $$,
+    $$ select public.reorder_group_items('a0000000-0000-0000-0000-000000000001', %L, %L, array[%L, %L, %L]::uuid[], %L) $$,
+    (select id from public.technical_jobs where organization_id = 'a0000000-0000-0000-0000-000000000001' and name = 'Job A'),
+    :'v_outer_container_id', :'v_item0_id', :'v_item0_id', :'v_item1_id', :v_rev_1
+  ),
+  '22023', null,
+  '8. reorder_group_items() rejects a list with a DUPLICATED id (e.g. [A, A, C] instead of [A, B, C]) -- never silently drops the omitted sibling'
+);
+
+select throws_ok(
+  format(
+    $$ select public.reorder_group_items('a0000000-0000-0000-0000-000000000001', %L, %L, array[%L]::uuid[], %L) $$,
     (select id from public.technical_jobs where organization_id = 'a0000000-0000-0000-0000-000000000001' and name = 'Job A'),
     (select id from public.runtime_nodes where technical_job_id = (select id from public.technical_jobs where organization_id = 'a0000000-0000-0000-0000-000000000001' and name = 'Job A') and definition_id = 'sec-inner' limit 1),
-    (select id from public.group_items where technical_job_id = (select id from public.technical_jobs where organization_id = 'a0000000-0000-0000-0000-000000000001' and name = 'Job A') and definition_section_id = 'sec-outer' limit 1)
+    (select id from public.group_items where technical_job_id = (select id from public.technical_jobs where organization_id = 'a0000000-0000-0000-0000-000000000001' and name = 'Job A') and definition_section_id = 'sec-outer' limit 1),
+    (select group_items_revision from public.runtime_nodes where technical_job_id = (select id from public.technical_jobs where organization_id = 'a0000000-0000-0000-0000-000000000001' and name = 'Job A') and definition_id = 'sec-inner' limit 1)
   ),
   '22023', null,
   '8. reorder_group_items() rejects an id that belongs to a DIFFERENT container'
 );
 
 -- ---------------------------------------------------------------------------
--- 10. Archive -> add -> restore: never a position collision.
+-- Red-team finding #2/#9: direct-write closure. As the SAME authenticated
+-- user who legitimately owns this job, a plain UPDATE of group_items --
+-- the exact PostgREST PATCH surface a real client uses -- must be
+-- rejected outright, for every field that used to be mutable this way.
+-- ---------------------------------------------------------------------------
+
+select throws_ok(
+  format(
+    $$ update public.group_items set position = 99 where id = %L $$,
+    :'v_item0_id'
+  ),
+  '42501', null,
+  '#2/#9. direct UPDATE of group_items.position is rejected (permission denied) for authenticated -- position may only change via reorder_group_items()/add_group_item()/restore_group_item()'
+);
+
+select throws_ok(
+  format(
+    $$ update public.group_items set state = 'archived' where id = %L $$,
+    :'v_item0_id'
+  ),
+  '42501', null,
+  '#2/#9. direct UPDATE of group_items.state is rejected (permission denied) for authenticated -- archive_group_item()/restore_group_item() are the only sanctioned paths'
+);
+
+select throws_ok(
+  format(
+    $$ update public.group_items set parent_group_item_id = %L where id = %L $$,
+    :'v_item1_id', :'v_item0_id'
+  ),
+  '42501', null,
+  '#2/#9. direct UPDATE of group_items.parent_group_item_id is rejected (permission denied) for authenticated -- it is always server-derived, never client-settable, not even via a raw PATCH'
+);
+
+select is(
+  (select position from public.group_items where id = :'v_item0_id'),
+  1,
+  '#2/#9. the three rejected direct-write attempts left the row completely untouched'
+);
+
+-- ---------------------------------------------------------------------------
+-- 10. Archive -> add -> restore: never a position collision. Archiving
+-- is RPC-only now (red-team finding #2/#3) -- never a plain PATCH.
 -- ---------------------------------------------------------------------------
 
 select lives_ok(
   format(
-    $$ update public.group_items set state = 'archived' where id = %L $$,
+    $$ select public.archive_group_item('a0000000-0000-0000-0000-000000000001', %L, %L) $$,
+    (select id from public.technical_jobs where organization_id = 'a0000000-0000-0000-0000-000000000001' and name = 'Job A'),
     (select id from public.group_items where technical_job_id = (select id from public.technical_jobs where organization_id = 'a0000000-0000-0000-0000-000000000001' and name = 'Job A') and definition_section_id = 'sec-outer' and position = 0)
   ),
-  '10. archive the outer item currently at position 0'
+  '10. archive_group_item() archives the outer item currently at position 0'
+);
+
+select lives_ok(
+  format(
+    $$ select public.archive_group_item('a0000000-0000-0000-0000-000000000001', %L, %L) $$,
+    (select id from public.technical_jobs where organization_id = 'a0000000-0000-0000-0000-000000000001' and name = 'Job A'),
+    (select id from public.group_items where technical_job_id = (select id from public.technical_jobs where organization_id = 'a0000000-0000-0000-0000-000000000001' and name = 'Job A') and definition_section_id = 'sec-outer' and position = 0)
+  ),
+  'archiving an already-archived GroupItem is a no-op, never throws'
 );
 
 select lives_ok(

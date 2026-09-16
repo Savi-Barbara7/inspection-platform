@@ -159,11 +159,23 @@ GroupItem.state:
   archived   → soft-hidden, recuperável, NUNCA um DELETE físico
 ```
 
-Um cliente comum só pode alterar `state`/`position`/`parentGroupItemId`
-via PATCH — a identidade (`organization_id`/`technical_job_id`/
-`definition_id`/`definition_section_id`/hierarquia) é congelada por um
-trigger (mesma técnica de comparação de `to_jsonb` inteira da Task 12),
-nunca dependendo só de disciplina da aplicação.
+Um cliente **não** pode alterar `state`/`position`/`parent_group_item_id`
+de um `GroupItem` via PATCH direto — `UPDATE` em `group_items` é
+revogado de `authenticated`/`anon` inteiramente (correção pós-15.5A,
+achado de red-team: a policy de RLS anterior permitia isso e contornava
+completamente as invariantes de `archive_group_item()`/
+`restore_group_item()`/`reorder_group_items()`). Toda mutação estrutural
+de um `GroupItem` passa por uma RPC `SECURITY DEFINER` — nunca um PATCH
+cru na tabela. O trigger de imutabilidade de identidade (mesma técnica
+de comparação de `to_jsonb` inteira da Task 12) continua existindo como
+segunda camada de defesa (útil mesmo dentro de uma RPC, caso algum
+código futuro tente indevidamente reescrever a identidade), mas a
+revogação do `GRANT UPDATE` é a defesa primária agora — um PATCH nem
+chega a ser avaliado pelo trigger, é rejeitado antes disso
+(`42501 permission denied`). `RuntimeNode.state`/`position` continuam
+PATCH-áveis diretamente (mudar visibilidade de um nó não é uma operação
+estrutural no mesmo sentido) — essa distinção é deliberada, não uma
+inconsistência.
 
 ## Ordem — sempre posição explícita
 
@@ -185,6 +197,28 @@ statement, não é deferrable (índice parcial não pode virar constraint
 deferrable) — atribuir posições finais uma a uma sem essa fase
 intermediária colidiria consigo mesmo ao trocar dois itens de lugar.
 
+**Concorrência otimista (correção pós-15.5A, achado de red-team):** um
+lock de linha impede colisão física entre duas chamadas concorrentes,
+mas não impede uma "lost update" — dois reorders calculados a partir do
+MESMO estado inicial, enviados quase ao mesmo tempo, usam exatamente o
+mesmo conjunto de ids (nada omitido/duplicado), então a validação de
+conjunto exato sozinha não pega isso. `runtime_nodes.group_items_revision`
+é um contador monotônico no próprio nó container, incrementado por
+`add_group_item()`/`duplicate_group_item()`/`archive_group_item()`/
+`restore_group_item()`/`reorder_group_items()` toda vez que o conjunto/
+ordem ativo de GroupItems daquele container realmente muda (nunca num
+no-op idempotente). `reorder_group_items()` agora exige
+`p_expected_revision` e rejeita a chamada (`errcode 40001`, mapeado para
+HTTP 409) se não bater com o valor atual — o cliente lê
+`groupItemsRevision` do container na árvore de documento e o devolve na
+chamada de reorder; se o container mudou nesse meio-tempo, a chamada
+falha em vez de sobrescrever silenciosamente. Provado com duas conexões
+Postgres reais e concorrentes (não apenas pgTAP sequencial): uma
+`duplicate_group_item()` segurando o lock do container por 3s bloqueou
+de fato uma `reorder_group_items()` concorrente por ~2.1s (nem deadlock,
+nem falha instantânea) — ao desbloquear, o reorder detectou a revisão
+alterada e abortou corretamente, sem aplicar nenhuma mudança parcial.
+
 ## Duplicar e arquivar
 
 `duplicate_group_item()` clona a subárvore de UM GroupItem com ids
@@ -194,23 +228,38 @@ dentro do item duplicado fica com seu próprio container novo, vazio) —
 isso é uma fronteira deliberada, documentada, não um esquecimento; também
 não copia `JobRuntimeValue`s. Resolve seu próprio container via
 `container_node_id` diretamente (Task 15.5A) — nunca mais por busca
-ambígua — e trava essa linha (`FOR UPDATE`) antes de calcular a posição
-do clone, fechando uma lacuna de concorrência que existia entre
-`duplicate_group_item()` e `add_group_item()` concorrentes sob o mesmo
-container (este último já travava; aquele não).
+ambígua.
 
-Arquivar (`PATCH /group-items/:id {state:"archived"}`) nunca deleta
-fisicamente — some da árvore padrão (`buildDocumentTree()` filtra por
-padrão), mas continua acessível com `includeArchived=true`.
+**Ordem de lock padronizada (correção pós-15.5A, achado de red-team):**
+toda mutação estrutural — `add_group_item()`, `duplicate_group_item()`,
+`archive_group_item()`, `restore_group_item()`, `reorder_group_items()`
+— trava primeiro o `RuntimeNode` container, depois o(s) `GroupItem`(s)
+que toca. Antes desta correção, `duplicate_group_item()`/
+`restore_group_item()` travavam o item primeiro e só depois o container
+— ordem invertida em relação a `reorder_group_items()` (que sempre
+travou o container primeiro), um risco real de deadlock entre um
+duplicate/restore e um reorder concorrentes no mesmo container. Provado
+com duas transações Postgres reais e concorrentes que a nova ordem
+nunca gera deadlock (só bloqueio serializado, com o tempo de espera
+exato esperado).
 
-Restaurar (`PATCH /group-items/:id {state:"active"}`) vai sempre por
-`restore_group_item()` (Task 15.5A) — nunca um PATCH direto na coluna:
-recalcula uma posição **nova**, ao final da lista de irmãos ativos, em
-vez de tentar reaproveitar a posição antiga do item. Isso fecha o
-cenário exato que motivou essa task: item na posição 1 → arquivado →
-um item novo assume a posição 1 → o item arquivado é restaurado — sem a
-posição recalculada, ele colidiria com o item novo. Restaurar um item já
-ativo é um no-op idempotente (retorna o item sem mudar nada).
+Arquivar (`archive_group_item()`, Task 15.5A red-team fix — antes um
+PATCH direto na coluna `state`, agora RPC-only, simétrico a restaurar)
+nunca deleta fisicamente — some da árvore padrão (`buildDocumentTree()`
+filtra por padrão), mas continua acessível com `includeArchived=true`.
+Arquivar um item já arquivado é um no-op idempotente.
+
+Restaurar (`restore_group_item()`, Task 15.5A) recalcula uma posição
+**nova**, ao final da lista de irmãos ativos, em vez de tentar
+reaproveitar a posição antiga do item. Isso fecha o cenário exato que
+motivou essa task: item na posição 1 → arquivado → um item novo assume
+a posição 1 → o item arquivado é restaurado — sem a posição recalculada,
+ele colidiria com o item novo. Restaurar um item já ativo é um no-op
+idempotente (retorna o item sem mudar nada). `PATCH /group-items/:id
+{state}` na API é o único ponto de entrada HTTP para ambos — despacha
+internamente para `archive_group_item()`/`restore_group_item()` conforme
+o valor de `state`, nunca um PATCH cru na tabela em nenhum dos dois
+casos.
 
 ## Document Tree — shape de leitura, nunca um blob armazenado
 
@@ -233,16 +282,23 @@ PATCH  /api/v1/technical-jobs/:id?organizationId=         {name?, status?, respo
 GET    /api/v1/technical-jobs/:id/document-tree?organizationId=&includeArchived=
 POST   /api/v1/technical-jobs/:id/group-items?organizationId= {containerNodeId}
 POST   /api/v1/technical-jobs/:id/reorder?organizationId=  {parentNodeId, groupItemId, orderedNodeIds[]}
-POST   /api/v1/technical-jobs/:id/group-items/reorder?organizationId=  {containerNodeId, orderedGroupItemIds[]}
+POST   /api/v1/technical-jobs/:id/group-items/reorder?organizationId=  {containerNodeId, orderedGroupItemIds[], expectedRevision}
 PATCH  /api/v1/group-items/:id?organizationId=&technicalJobId=  {state}
 POST   /api/v1/group-items/:id/duplicate?organizationId=&technicalJobId=
 ```
 
 `containerNodeId` sozinho basta para adicionar/reordenar um GroupItem
-(Task 15.5A) — `parentGroupItemId` não é mais aceito como input: é sempre
-derivado no servidor a partir do próprio container. `PATCH {state:"active"}`
-sobre um GroupItem arquivado dispara `restore_group_item()` internamente
-(posição recalculada) — nunca um PATCH cru na coluna `state`.
+(Task 15.5A) — `parentGroupItemId` não é mais aceito como input: o
+schema é `.strict()` e rejeita esse campo com 422 (correção pós-15.5A;
+antes era silenciosamente ignorado). `expectedRevision` (correção
+pós-15.5A, concorrência otimista) é o `groupItemsRevision` do container
+lido pelo cliente na árvore de documento — se o container mudou desde
+então, a chamada falha com **409**, nunca sobrescreve silenciosamente.
+`PATCH {state:"active"}`/`{state:"archived"}` sobre um GroupItem
+despacha para `restore_group_item()`/`archive_group_item()`
+internamente — nunca um PATCH cru na tabela em nenhum dos dois casos;
+direto via PostgREST, um `UPDATE` em `group_items` é rejeitado com
+`403`/`42501` para qualquer campo, sempre.
 
 Nenhum endpoint por tipo de bloco. `organizationId`/`technicalJobId` como
 query params obrigatórios em recursos de topo, nunca aninhados no path —

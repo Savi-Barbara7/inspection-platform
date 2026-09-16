@@ -436,32 +436,12 @@ describe("POST /api/v1/technical-jobs/:id/group-items", () => {
 
   // Task 15.5A: parentGroupItemId was removed as independent input --
   // it is always derived server-side from the container's own
-  // groupItemId. A client-supplied value must be rejected outright
-  // (unknown-key stripping alone wouldn't prove the field can no
-  // longer smuggle a mismatched parent into the RPC call).
-  it("does not forward a client-supplied parentGroupItemId to add_group_item() -- the parameter no longer exists", async () => {
-    let capturedRpcBody: Record<string, unknown> | undefined;
-    stubFetch({
-      membership: membershipHandler("owner"),
-      addGroupItemRpc: (init) => {
-        capturedRpcBody = JSON.parse(init.body as string);
-        return new Response(
-          JSON.stringify({
-            id: "e0000000-0000-0000-0000-000000000001",
-            organization_id: orgId,
-            technical_job_id: jobId,
-            container_node_id: nodeId,
-            definition_section_id: "sec-group",
-            parent_group_item_id: "f0000000-0000-0000-0000-000000000009",
-            position: 0,
-            state: "active",
-            created_at: "2026-09-15T00:00:00.000Z",
-            updated_at: "2026-09-15T00:00:00.000Z"
-          }),
-          { status: 200 }
-        );
-      }
-    });
+  // groupItemId. Red-team finding #12: a client-supplied value is now
+  // rejected outright (422, schema is .strict()) rather than silently
+  // stripped -- a clear signal instead of a field that quietly does
+  // nothing.
+  it("rejects a client-supplied parentGroupItemId outright -- the field no longer exists on this schema", async () => {
+    stubFetch({ membership: membershipHandler("owner") });
     const res = await app.request(
       `/api/v1/technical-jobs/${jobId}/group-items?organizationId=${orgId}`,
       {
@@ -474,12 +454,7 @@ describe("POST /api/v1/technical-jobs/:id/group-items", () => {
       },
       env
     );
-    expect(res.status).toBe(201);
-    expect(capturedRpcBody).toEqual({
-      p_organization_id: orgId,
-      p_technical_job_id: jobId,
-      p_container_node_id: nodeId
-    });
+    expect(res.status).toBe(422);
   });
 });
 
@@ -492,6 +467,51 @@ describe("POST /api/v1/technical-jobs/:id/group-items/reorder", () => {
       reorderGroupItemsRpc: () =>
         new Response(JSON.stringify({ code: "22023", message: "mismatch" }), { status: 400 })
     });
+    const groupItemId = "e0000000-0000-0000-0000-000000000001";
+    const res = await app.request(
+      `/api/v1/technical-jobs/${jobId}/group-items/reorder?organizationId=${orgId}`,
+      {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          containerNodeId: nodeId,
+          orderedGroupItemIds: [groupItemId],
+          expectedRevision: 0
+        })
+      },
+      env
+    );
+    expect(res.status).toBe(422);
+  });
+
+  // Task 15.5A red-team fix (optimistic concurrency): a stale
+  // expectedRevision is rejected with 409, never silently overwriting
+  // a change the caller never saw.
+  it("returns 409 when expectedRevision no longer matches the container's current revision", async () => {
+    stubFetch({
+      membership: membershipHandler("owner"),
+      reorderGroupItemsRpc: () =>
+        new Response(JSON.stringify({ code: "40001", message: "stale revision" }), { status: 400 })
+    });
+    const groupItemId = "e0000000-0000-0000-0000-000000000001";
+    const res = await app.request(
+      `/api/v1/technical-jobs/${jobId}/group-items/reorder?organizationId=${orgId}`,
+      {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          containerNodeId: nodeId,
+          orderedGroupItemIds: [groupItemId],
+          expectedRevision: 3
+        })
+      },
+      env
+    );
+    expect(res.status).toBe(409);
+  });
+
+  it("rejects a request missing expectedRevision", async () => {
+    stubFetch({ membership: membershipHandler("owner") });
     const groupItemId = "e0000000-0000-0000-0000-000000000001";
     const res = await app.request(
       `/api/v1/technical-jobs/${jobId}/group-items/reorder?organizationId=${orgId}`,
@@ -525,7 +545,11 @@ describe("POST /api/v1/technical-jobs/:id/group-items/reorder", () => {
       {
         method: "POST",
         headers: authHeaders,
-        body: JSON.stringify({ containerNodeId: nodeId, orderedGroupItemIds: [groupItemId] })
+        body: JSON.stringify({
+          containerNodeId: nodeId,
+          orderedGroupItemIds: [groupItemId],
+          expectedRevision: 2
+        })
       },
       env
     );
@@ -534,7 +558,8 @@ describe("POST /api/v1/technical-jobs/:id/group-items/reorder", () => {
       p_organization_id: orgId,
       p_technical_job_id: jobId,
       p_container_node_id: nodeId,
-      p_ordered_group_item_ids: [groupItemId]
+      p_ordered_group_item_ids: [groupItemId],
+      p_expected_revision: 2
     });
     expect(capturedAudit).toMatchObject({ p_action: "group_item.reordered" });
   });

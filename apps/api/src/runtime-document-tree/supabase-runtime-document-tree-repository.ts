@@ -3,6 +3,7 @@ import {
   GroupItemNotFoundError,
   NotARepeatableContainerError,
   ReorderMismatchError,
+  ReorderRevisionMismatchError,
   RuntimeNodeNotFoundError,
   type AddGroupItemInput,
   type BuildDocumentTreeOptions,
@@ -28,6 +29,7 @@ type RuntimeNodeRow = {
   is_repeatable_container: boolean;
   position: number;
   state: RuntimeNodeState;
+  group_items_revision: number;
   created_at: string;
   updated_at: string;
 };
@@ -58,6 +60,7 @@ function toRuntimeNode(row: RuntimeNodeRow): RuntimeNode {
     isRepeatableContainer: row.is_repeatable_container,
     position: row.position,
     state: row.state,
+    groupItemsRevision: row.group_items_revision,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -205,48 +208,16 @@ export function createSupabaseRuntimeDocumentTreeRepository(
       groupItemId,
       state
     ): Promise<GroupItem | null> {
-      // Restoring to "active" always goes through restore_group_item():
-      // it must recompute a fresh, non-colliding position (Task 15.5A)
-      // rather than reclaiming whatever position this row still holds
-      // from before it was archived, which a plain PATCH would do and
-      // which can collide with a position a newer sibling has since
-      // taken. Archiving stays a plain PATCH -- it never needs to
-      // preserve position uniqueness (the item simply leaves the active
-      // set).
+      // Task 15.5A red-team fix: both directions are RPC-only now --
+      // direct UPDATE of group_items is revoked from authenticated/anon
+      // entirely (it used to let a client bypass archive/restore's own
+      // invariants: position recomputation on restore, and the fact
+      // that neither should ever touch parent_group_item_id). Never a
+      // plain PATCH either way.
       if (state === "active") {
-        const response = await fetch(`${supabaseUrl}/rest/v1/rpc/restore_group_item`, {
-          method: "POST",
-          headers: headers(authToken, { Accept: "application/vnd.pgrst.object+json" }),
-          body: JSON.stringify({
-            p_organization_id: organizationId,
-            p_technical_job_id: technicalJobId,
-            p_group_item_id: groupItemId
-          })
-        });
-        if (!response.ok) {
-          const body: unknown = await response.json().catch(() => null);
-          if (rpcErrorCode(body) === "P0002") return null;
-          throw new Error(`restore group item failed with status ${response.status}`);
-        }
-        return toGroupItem((await response.json()) as GroupItemRow);
+        return this.restoreGroupItem(authToken, organizationId, technicalJobId, groupItemId);
       }
-
-      const response = await fetch(
-        `${supabaseUrl}/rest/v1/group_items?id=eq.${groupItemId}&organization_id=eq.${organizationId}&technical_job_id=eq.${technicalJobId}`,
-        {
-          method: "PATCH",
-          headers: headers(authToken, {
-            Prefer: "return=representation",
-            Accept: "application/vnd.pgrst.object+json"
-          }),
-          body: JSON.stringify({ state })
-        }
-      );
-      if (response.status === 406 || response.status === 404) return null;
-      if (!response.ok) {
-        throw new Error(`update group item state failed with status ${response.status}`);
-      }
-      return toGroupItem((await response.json()) as GroupItemRow);
+      return this.archiveGroupItem(authToken, organizationId, technicalJobId, groupItemId);
     },
 
     async reorderGroupItems(
@@ -262,15 +233,41 @@ export function createSupabaseRuntimeDocumentTreeRepository(
           p_organization_id: organizationId,
           p_technical_job_id: technicalJobId,
           p_container_node_id: input.containerNodeId,
-          p_ordered_group_item_ids: input.orderedGroupItemIds
+          p_ordered_group_item_ids: input.orderedGroupItemIds,
+          p_expected_revision: input.expectedRevision
         })
       });
       if (!response.ok) {
         const body: unknown = await response.json().catch(() => null);
-        if (rpcErrorCode(body) === "22023") throw new ReorderMismatchError();
-        if (rpcErrorCode(body) === "P0002") throw new RuntimeNodeNotFoundError(input.containerNodeId);
+        const code = rpcErrorCode(body);
+        if (code === "22023") throw new ReorderMismatchError();
+        if (code === "40001") throw new ReorderRevisionMismatchError();
+        if (code === "P0002") throw new RuntimeNodeNotFoundError(input.containerNodeId);
         throw new Error(`reorder group items failed with status ${response.status}`);
       }
+    },
+
+    async archiveGroupItem(
+      authToken,
+      organizationId,
+      technicalJobId,
+      groupItemId
+    ): Promise<GroupItem | null> {
+      const response = await fetch(`${supabaseUrl}/rest/v1/rpc/archive_group_item`, {
+        method: "POST",
+        headers: headers(authToken, { Accept: "application/vnd.pgrst.object+json" }),
+        body: JSON.stringify({
+          p_organization_id: organizationId,
+          p_technical_job_id: technicalJobId,
+          p_group_item_id: groupItemId
+        })
+      });
+      if (!response.ok) {
+        const body: unknown = await response.json().catch(() => null);
+        if (rpcErrorCode(body) === "P0002") return null;
+        throw new Error(`archive group item failed with status ${response.status}`);
+      }
+      return toGroupItem((await response.json()) as GroupItemRow);
     },
 
     async restoreGroupItem(

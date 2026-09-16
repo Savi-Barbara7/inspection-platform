@@ -39,6 +39,7 @@ function stubFetch(handlers: {
   membership?: (url: string, init: RequestInit) => Response;
   groupItems?: (url: string, init: RequestInit) => Response;
   duplicateRpc?: (init: RequestInit) => Response;
+  archiveRpc?: (init: RequestInit) => Response;
   restoreRpc?: (init: RequestInit) => Response;
   auditRpc?: (init: RequestInit) => Response;
 }) {
@@ -61,6 +62,9 @@ function stubFetch(handlers: {
       }
       if (url.startsWith(`${env.SUPABASE_URL}/rest/v1/rpc/restore_group_item`)) {
         if (handlers.restoreRpc) return handlers.restoreRpc(init);
+      }
+      if (url.startsWith(`${env.SUPABASE_URL}/rest/v1/rpc/archive_group_item`)) {
+        if (handlers.archiveRpc) return handlers.archiveRpc(init);
       }
       if (
         url.startsWith(`${env.SUPABASE_URL}/rest/v1/organization_memberships`) &&
@@ -88,13 +92,17 @@ describe("PATCH /api/v1/group-items/:id", () => {
     expect(res.status).toBe(401);
   });
 
-  it("archives a group item — never a physical delete, and audits it", async () => {
-    let capturedBody: Record<string, unknown> | undefined;
+  // Task 15.5A red-team fix: archiving always goes through
+  // archive_group_item() -- never a plain PATCH. Direct UPDATE of
+  // group_items is revoked from authenticated/anon entirely, so a
+  // plain PATCH mock is no longer a valid stand-in for this path.
+  it("archives a group item via archive_group_item() — never a physical delete, and audits it", async () => {
+    let capturedRpcBody: Record<string, unknown> | undefined;
     let capturedAudit: Record<string, unknown> | undefined;
     stubFetch({
       membership: membershipHandler("inspector"),
-      groupItems: (_url, init) => {
-        capturedBody = JSON.parse(init.body as string);
+      archiveRpc: (init) => {
+        capturedRpcBody = JSON.parse(init.body as string);
         return new Response(JSON.stringify(groupItemRow({ state: "archived" })), { status: 200 });
       },
       auditRpc: (init) => {
@@ -110,14 +118,19 @@ describe("PATCH /api/v1/group-items/:id", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { state: string };
     expect(body.state).toBe("archived");
-    expect(capturedBody).toEqual({ state: "archived" });
+    expect(capturedRpcBody).toMatchObject({
+      p_organization_id: orgId,
+      p_technical_job_id: jobId,
+      p_group_item_id: groupItemId
+    });
     expect(capturedAudit).toMatchObject({ p_action: "group_item.archived" });
   });
 
   it("returns 404 when the group item doesn't exist in this job/organization (archive path)", async () => {
     stubFetch({
       membership: membershipHandler("owner"),
-      groupItems: () => new Response(null, { status: 406 })
+      archiveRpc: () =>
+        new Response(JSON.stringify({ code: "P0002", message: "not found" }), { status: 400 })
     });
     const res = await app.request(
       `/api/v1/group-items/${groupItemId}?organizationId=${orgId}&technicalJobId=${jobId}`,

@@ -1,0 +1,44 @@
+-- Migration ledger reconciliation record (Task 15.5A red-team finding
+-- #11) -- no schema change. This file exists ONLY so that
+-- `supabase migration list --linked` shows local/remote in agreement;
+-- it intentionally contains no DDL.
+--
+-- What happened: the previous round applied
+-- 20260915040000_task_15_5a_runtime_tree_integrity.sql to staging
+-- (lxechulbjswneiqowant) via the Supabase MCP `apply_migration` tool
+-- rather than the Supabase CLI. That tool recorded the migration in
+-- `supabase_migrations.schema_migrations` under the timestamp it was
+-- APPLIED at (20260916125902), not the timestamp in the local file's
+-- own name (20260915040000) -- a CLI-driven `supabase db push` derives
+-- the ledger version from the filename instead, so this diverged from
+-- what a normal push would have produced.
+--
+-- Left uncorrected, this would have caused a real problem: a future
+-- `supabase db push` compares LOCAL migration filenames against the
+-- REMOTE ledger by version. Since remote had no row for
+-- "20260915040000", the CLI would have tried to re-apply that file
+-- against a database that already has its column/function changes --
+-- guaranteed "already exists" errors.
+--
+-- Fix applied directly to staging (via the same MCP tool, since
+-- `execute_sql` there runs read-only and only `apply_migration` can
+-- write): `update supabase_migrations.schema_migrations set version =
+-- '20260915040000' where version = '20260916125902' and name =
+-- 'task_15_5a_runtime_tree_integrity';`. Verified immediately after:
+-- `supabase migration list --linked` reported `20260915040000` as
+-- local=remote-matched, and every RPC/column introduced by that
+-- migration was confirmed present with the correct signature via direct
+-- SQL (get_advisors, pg_proc, information_schema.columns).
+--
+-- Residual, accepted drift: applying that one UPDATE through
+-- `apply_migration` itself created a SECOND ledger row for the
+-- correction, timestamped 20260916130021 (this file's own name) --
+-- every write through that tool self-records as its own "migration",
+-- and there is no available tool call that writes to
+-- `supabase_migrations.schema_migrations` without doing the same
+-- (attempting to remove that second row would just create a third).
+-- Rather than compounding it, this file closes the gap the safe way:
+-- it gives that already-real remote ledger entry a matching local file,
+-- so `local` and `remote` agree from this point forward, and the
+-- history stays a truthful, append-only record of what actually
+-- happened -- never rewritten, never invented.

@@ -1,0 +1,16 @@
+-- Migration ledger reconciliation record -- no schema change. Same
+-- situation as 20260916130021_fix_task_15_5a_migration_ledger_version.sql,
+-- one migration later: applying
+-- 20260916150000_task_15_5a_redteam_fixes.sql to staging
+-- (lxechulbjswneiqowant) via the Supabase MCP `apply_migration` tool
+-- recorded it under its application timestamp (20260916135149) instead
+-- of the local file's own name (20260916150000). Corrected on staging
+-- with `update supabase_migrations.schema_migrations set version =
+-- '20260916150000' where version = '20260916135149' and name =
+-- 'task_15_5a_redteam_fixes';`, verified via `supabase migration list
+-- --linked` showing local=remote agreement. That correction itself
+-- recorded as ledger version 20260916135256 -- this file gives it a
+-- matching local name, same reconciliation approach as before, for the
+-- same reason: every write through that tool self-records as its own
+-- migration, and there is no available tool call that updates
+-- supabase_migrations.schema_migrations without doing the same.

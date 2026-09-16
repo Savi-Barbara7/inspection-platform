@@ -11,6 +11,7 @@ import type { JobSourceAssignmentsRepository } from "@inspection-platform/domain
 import {
   NotARepeatableContainerError,
   ReorderMismatchError,
+  ReorderRevisionMismatchError,
   RuntimeNodeNotFoundError,
   type RuntimeDocumentTreeRepository
 } from "@inspection-platform/domain/runtime-document-tree";
@@ -23,6 +24,7 @@ import { recordAuditEventBestEffort } from "../lib/audit-helpers";
 import {
   validationError,
   fieldValidationError,
+  conflictError,
   notFoundError as notFoundErrorBase
 } from "../lib/http-errors";
 import type { AppEnv } from "../types";
@@ -58,9 +60,16 @@ const updateTechnicalJobSchema = z
   })
   .refine((data) => Object.keys(data).length > 0, { message: "at least one field is required" });
 
-const addGroupItemSchema = z.object({
-  containerNodeId: z.string().uuid()
-});
+// .strict() rejects any unrecognized field outright (422) instead of
+// silently stripping it -- specifically so a client-supplied
+// parentGroupItemId (removed in Task 15.5A: it is always derived
+// server-side from the container's own groupItemId) gets a clear
+// rejection rather than being silently ignored (red-team finding #12).
+const addGroupItemSchema = z
+  .object({
+    containerNodeId: z.string().uuid()
+  })
+  .strict();
 
 const reorderSchema = z.object({
   parentNodeId: z.string().uuid().nullable(),
@@ -74,7 +83,13 @@ const reorderSchema = z.object({
 // carry, the way node reorder needs both parentNodeId and groupItemId.
 const reorderGroupItemsSchema = z.object({
   containerNodeId: z.string().uuid(),
-  orderedGroupItemIds: z.array(z.string().uuid()).min(1)
+  orderedGroupItemIds: z.array(z.string().uuid()).min(1),
+  // Optimistic concurrency (Task 15.5A red-team fix): the caller echoes
+  // back the container's groupItemsRevision as last observed (from the
+  // document-tree read) -- a reorder computed against a stale view is
+  // rejected with 409 rather than silently overwriting a change it
+  // never saw.
+  expectedRevision: z.number().int().nonnegative()
 });
 
 /**
@@ -362,15 +377,30 @@ export function createTechnicalJobsRoutes(
       const technicalJobId = c.req.param("id");
 
       try {
-        await getTreeRepository(c.env).reorderGroupItems(authToken, organizationId, technicalJobId, {
-          containerNodeId: parsed.data.containerNodeId,
-          orderedGroupItemIds: parsed.data.orderedGroupItemIds
-        });
+        await getTreeRepository(c.env).reorderGroupItems(
+          authToken,
+          organizationId,
+          technicalJobId,
+          {
+            containerNodeId: parsed.data.containerNodeId,
+            orderedGroupItemIds: parsed.data.orderedGroupItemIds,
+            expectedRevision: parsed.data.expectedRevision
+          }
+        );
       } catch (err) {
         if (err instanceof ReorderMismatchError) {
           return c.json(
             fieldValidationError(c.get("requestId"), "orderedGroupItemIds", err.message),
             422
+          );
+        }
+        if (err instanceof ReorderRevisionMismatchError) {
+          return c.json(
+            conflictError(
+              c.get("requestId"),
+              "The container has changed since expectedRevision was read"
+            ),
+            409
           );
         }
         if (err instanceof RuntimeNodeNotFoundError) {

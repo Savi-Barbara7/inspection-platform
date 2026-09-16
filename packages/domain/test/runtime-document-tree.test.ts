@@ -29,6 +29,7 @@ function node(
     isRepeatableContainer: false,
     position: 0,
     state: "visible",
+    groupItemsRevision: 0,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     ...overrides
@@ -257,6 +258,32 @@ describe("buildDocumentTree() — pure assembly from flat RuntimeNode/GroupItem 
     expect(tree[1]!.children).toEqual([]);
   });
 
+  it("Task 15.5A red-team fix: groupItemsRevision surfaces on a repeatable container, undefined on a plain node", () => {
+    const nodes: RuntimeNode[] = [
+      node({
+        id: "n-sec-1",
+        definitionId: "sec-1",
+        definitionKind: "section",
+        blockType: null,
+        position: 0
+      }),
+      node({
+        id: "n-group",
+        definitionId: "sec-group",
+        definitionKind: "section",
+        blockType: null,
+        isRepeatableContainer: true,
+        groupItemsRevision: 7,
+        position: 1
+      })
+    ];
+    const tree = buildDocumentTree(nodes, []);
+    const plainNode = tree.find((n) => n.definitionId === "sec-1")!;
+    const container = tree.find((n) => n.definitionId === "sec-group")!;
+    expect(plainNode.groupItemsRevision).toBeUndefined();
+    expect(container.groupItemsRevision).toBe(7);
+  });
+
   it("22/23. a RepeatableGroup container carries its own GroupItems, each with an independent subtree even though every item shares the same definitionId children", () => {
     const nodes: RuntimeNode[] = [
       node({
@@ -301,8 +328,18 @@ describe("buildDocumentTree() — pure assembly from flat RuntimeNode/GroupItem 
       })
     ];
     const groupItems: GroupItem[] = [
-      groupItem({ id: "gi-a", definitionSectionId: "sec-group", containerNodeId: "n-group", position: 0 }),
-      groupItem({ id: "gi-b", definitionSectionId: "sec-group", containerNodeId: "n-group", position: 1 })
+      groupItem({
+        id: "gi-a",
+        definitionSectionId: "sec-group",
+        containerNodeId: "n-group",
+        position: 0
+      }),
+      groupItem({
+        id: "gi-b",
+        definitionSectionId: "sec-group",
+        containerNodeId: "n-group",
+        position: 1
+      })
     ];
     const tree = buildDocumentTree(nodes, groupItems);
     expect(tree).toHaveLength(1);

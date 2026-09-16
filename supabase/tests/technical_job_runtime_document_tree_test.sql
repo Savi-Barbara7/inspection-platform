@@ -16,7 +16,7 @@
 -- Fictitious fixtures only.
 
 begin;
-select plan(42);
+select plan(43);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures: Org A (owner, inspector) and Org B (owner), each with one
@@ -385,12 +385,17 @@ select is(
 
 -- ---------------------------------------------------------------------------
 -- 19. Archiving a GroupItem never physically deletes it, and a plain
--- client PATCH may never rewrite its identity.
+-- client PATCH may never rewrite its identity or its state (Task 15.5A
+-- red-team fix: direct UPDATE of group_items is revoked from
+-- authenticated/anon entirely -- archive_group_item() is the only
+-- sanctioned path now, symmetric with restore_group_item()).
 -- ---------------------------------------------------------------------------
 
-update public.group_items
-set state = 'archived'
-where id = (select id from public.group_items where technical_job_id = (select id from public.technical_jobs where organization_id = 'f0000000-0000-0000-0000-000000000001' and name = 'Job A') order by position limit 1);
+select public.archive_group_item(
+  'f0000000-0000-0000-0000-000000000001',
+  (select id from public.technical_jobs where organization_id = 'f0000000-0000-0000-0000-000000000001' and name = 'Job A'),
+  (select id from public.group_items where technical_job_id = (select id from public.technical_jobs where organization_id = 'f0000000-0000-0000-0000-000000000001' and name = 'Job A') order by position limit 1)
+);
 
 select is(
   (select count(*)::int from public.group_items
@@ -405,14 +410,34 @@ select is(
   '19. its state is archived'
 );
 
+-- Task 15.5A red-team fix: a plain client UPDATE is rejected outright at
+-- the grant level (42501) -- before the identity trigger even gets a
+-- chance to run. This is the PRIMARY defense now.
+select throws_ok(
+  format(
+    $$ update public.group_items set definition_section_id = 'smuggled' where id = %L $$,
+    (select id from public.group_items where technical_job_id = (select id from public.technical_jobs where organization_id = 'f0000000-0000-0000-0000-000000000001' and name = 'Job A') limit 1)
+  ),
+  '42501', null,
+  'a plain client UPDATE of group_items is rejected outright (permission denied) -- UPDATE is revoked from authenticated entirely (Task 15.5A red-team fix), never reaching the identity trigger'
+);
+
+-- Defense-in-depth: even bypassing the grant revoke (as postgres, the
+-- same privilege level a SECURITY DEFINER RPC runs at), the identity
+-- trigger still independently rejects an attempt to rewrite
+-- definition_section_id -- proving the trigger itself is still correct,
+-- not just resting on the grant revoke as the only line of defense.
+reset role;
 select throws_ok(
   format(
     $$ update public.group_items set definition_section_id = 'smuggled' where id = %L $$,
     (select id from public.group_items where technical_job_id = (select id from public.technical_jobs where organization_id = 'f0000000-0000-0000-0000-000000000001' and name = 'Job A') limit 1)
   ),
   '55000', null,
-  'a plain client UPDATE can never rewrite a GroupItem''s identity (definition_section_id) -- structural trigger, not just app-layer discipline'
+  'even bypassing the grant revoke (as postgres), the identity trigger independently rejects rewriting definition_section_id -- defense-in-depth, not the grant revoke alone'
 );
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-900000000001","role":"authenticated"}', true);
 
 -- ---------------------------------------------------------------------------
 -- 15/16/20. Hidden/conditional_inactive node states persist (never

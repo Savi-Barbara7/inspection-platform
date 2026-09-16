@@ -175,6 +175,18 @@ export interface RuntimeNode {
   isRepeatableContainer: boolean;
   position: number;
   state: RuntimeNodeState;
+  /**
+   * Monotonic counter, meaningful only when `isRepeatableContainer` is
+   * true: incremented by the server every time this container's active
+   * `GroupItem` set or order actually changes (add/duplicate/archive/
+   * restore/reorder — never on an idempotent no-op). A client reorder
+   * echoes back the value it last observed; `reorder_group_items()`
+   * rejects the call (Task 15.5A red-team fix) if it no longer matches,
+   * so a reorder computed against a stale view can never silently
+   * overwrite a change it never saw. Always 0 and unused on a
+   * non-container node.
+   */
+  groupItemsRevision: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -251,6 +263,8 @@ export interface DocumentTreeNode {
   children: DocumentTreeNode[];
   /** Present only when isRepeatableContainer is true. */
   groupItems?: DocumentTreeGroupItem[];
+  /** Present only when isRepeatableContainer is true — see `RuntimeNode.groupItemsRevision`. Read this before computing a GroupItem reorder and echo it back as `expectedRevision`. */
+  groupItemsRevision?: number;
 }
 
 export interface DocumentTreeGroupItem {
@@ -291,9 +305,12 @@ function nodeToTreeNode(
     // container instances, one per enclosing GroupItem) nor by
     // `enclosingGroupItemId` alone.
     base.groupItems = groupItems
-      .filter((gi) => gi.containerNodeId === node.id && (includeArchived || gi.state !== "archived"))
+      .filter(
+        (gi) => gi.containerNodeId === node.id && (includeArchived || gi.state !== "archived")
+      )
       .sort((a, b) => a.position - b.position)
       .map((gi) => groupItemToTreeNode(gi, nodes, groupItems, includeArchived));
+    base.groupItemsRevision = node.groupItemsRevision;
     return base;
   }
 
@@ -381,6 +398,23 @@ export class ReorderMismatchError extends Error {
   }
 }
 
+/**
+ * Thrown when `reorder_group_items()`'s `expectedRevision` no longer
+ * matches the container's current `groupItemsRevision` (Task 15.5A
+ * red-team fix): the container's active GroupItem set/order changed
+ * since the caller last observed it (another add/duplicate/archive/
+ * restore/reorder landed first). Maps to HTTP 409 — never silently
+ * overwrites the intervening change; the caller must refetch and retry.
+ */
+export class ReorderRevisionMismatchError extends Error {
+  constructor() {
+    super(
+      "the container's GroupItem set/order has changed since expectedRevision was read -- refetch and retry"
+    );
+    this.name = "ReorderRevisionMismatchError";
+  }
+}
+
 export interface AddGroupItemInput {
   /**
    * The repeatable-container RuntimeNode to add an item under. That's
@@ -412,6 +446,15 @@ export interface ReorderRuntimeNodesInput {
 export interface ReorderGroupItemsInput {
   containerNodeId: string;
   orderedGroupItemIds: string[];
+  /**
+   * The container's `groupItemsRevision` as last observed by the caller
+   * (Task 15.5A red-team fix, optimistic concurrency). The server
+   * rejects the call with `ReorderRevisionMismatchError` if the
+   * container's current revision no longer matches — someone else's
+   * add/duplicate/archive/restore/reorder landed first, and a reorder
+   * computed against a stale view must never silently overwrite it.
+   */
+  expectedRevision: number;
 }
 
 /**
@@ -442,6 +485,15 @@ export interface RuntimeDocumentTreeRepository {
     technicalJobId: string,
     groupItemId: string
   ): Promise<GroupItem>;
+  /**
+   * Sets a GroupItem's state. Both directions always go through a
+   * SECURITY DEFINER RPC (Task 15.5A red-team fix: direct PostgREST
+   * PATCH of `state`/`position`/`parent_group_item_id` is revoked at
+   * the grant level, closing a path that used to let a client bypass
+   * `archive_group_item()`/`restore_group_item()` entirely) —
+   * `archive_group_item()` for `"archived"`, `restoreGroupItem()`'s own
+   * RPC for `"active"`. Never a plain table PATCH either way.
+   */
   updateGroupItemState(
     authToken: string,
     organizationId: string,
@@ -466,7 +518,10 @@ export interface RuntimeDocumentTreeRepository {
    * Reassigns position for every active GroupItem under one container —
    * ids never change (Task 15.5A, mirrors `reorderNodes()` for
    * `RuntimeNode`s). Throws `ReorderMismatchError` when the ordered id
-   * list doesn't exactly match the container's current active children.
+   * list doesn't exactly match the container's current active children,
+   * or `ReorderRevisionMismatchError` (red-team fix) when
+   * `input.expectedRevision` no longer matches the container's current
+   * `groupItemsRevision`.
    */
   reorderGroupItems(
     authToken: string,
@@ -474,6 +529,21 @@ export interface RuntimeDocumentTreeRepository {
     technicalJobId: string,
     input: ReorderGroupItemsInput
   ): Promise<void>;
+  /**
+   * Archives a GroupItem via `archive_group_item()` (Task 15.5A
+   * red-team fix — previously a plain PATCH, which is now structurally
+   * impossible: direct UPDATE of `group_items` is revoked from
+   * `authenticated`/`anon`). Never physically deletes; never touches
+   * position (archiving doesn't need to preserve position uniqueness —
+   * only restoring back into the active set does). Archiving an
+   * already-archived item is a no-op that returns it unchanged.
+   */
+  archiveGroupItem(
+    authToken: string,
+    organizationId: string,
+    technicalJobId: string,
+    groupItemId: string
+  ): Promise<GroupItem | null>;
   /**
    * Restores an archived GroupItem with a freshly computed, always-valid
    * position at the end of its container's active list (Task 15.5A) —
